@@ -79,7 +79,6 @@ def resolve_rules_path(explicit_path: str | Path | None = None) -> Path:
 
 @dataclass
 class Runtime:
-    database: Database
     repository: SqliteRepository
     graph: Any
     rules: BusinessRules
@@ -156,7 +155,7 @@ def create_runtime(
         else:
             checkpointer = InMemorySaver()
     graph = build_graph(deps, checkpointer)
-    return Runtime(database, repository, graph, rules, use_demo, connection)
+    return Runtime(repository, graph, rules, use_demo, connection)
 
 
 class CaseService:
@@ -230,12 +229,8 @@ class CaseService:
                 exception_types[name] = exception_types.get(name, 0) + 1
         return {
             "total": len(cases),
-            "completed": len(completed),
             "pending": len(cases) - len(completed),
             "autonomous_rate": len(autonomous) / len(completed) if completed else 0,
-            "human_review_rate": (len(completed) - len(autonomous)) / len(completed)
-            if completed
-            else 0,
             "average_confidence": sum(confidences) / len(confidences) if confidences else 0,
             "actions": actions,
             "exception_types": exception_types,

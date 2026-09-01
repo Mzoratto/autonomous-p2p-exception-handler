@@ -156,17 +156,7 @@ UI_STYLES = """
   .architecture-grid .panel { min-height:145px; margin:0; }
   .architecture-icon { display:grid; place-items:center; width:28px; height:28px; margin-bottom:.65rem; border-radius:8px; background:var(--blue-soft); color:var(--blue); font-size:.72rem; font-weight:800; }
   .architecture-meta { color:var(--blue); font-size:.65rem; font-weight:700; margin-top:.7rem; }
-  .distribution-row { display:grid; grid-template-columns: minmax(90px, 1fr) 2.5fr 34px; align-items:center; gap:.75rem; margin:.78rem 0; }
-  .distribution-label { color:#344054; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .distribution-track { height:7px; background:#edf0f4; border-radius:999px; overflow:hidden; }
-  .distribution-fill { height:100%; min-width:3px; background:var(--blue); border-radius:999px; }
-  .distribution-value { color:#475467; text-align:right; font-size:.76rem; font-variant-numeric:tabular-nums; }
   .empty-mini { color:#98a2b3; font-size:.8rem; padding:.75rem 0 .25rem; }
-  .recent-row { display:grid; grid-template-columns: minmax(112px,1fr) minmax(60px,.75fr) auto; align-items:center; gap:.62rem; padding:.72rem 0; border-top:1px solid #edf0f4; }
-  .recent-row:first-of-type { border-top:0; }
-  .recent-id { color:#344054; font-size:.7rem; font-weight:700; white-space:nowrap; }
-  .recent-meta { color:#98a2b3; font-size:.7rem; margin-top:.13rem; }
-  .recent-supplier { color:#475467; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   /* Status */
   .status-pill { display:inline-flex; align-items:center; gap:.34rem; width:max-content; border-radius:999px; padding:.28rem .52rem; font-size:.65rem; font-weight:760; letter-spacing:.02em; text-transform:uppercase; }
@@ -281,9 +271,6 @@ UI_STYLES = """
     .case-table th:nth-child(5), .case-table td:nth-child(5),
     .case-table th:nth-child(6), .case-table td:nth-child(6) { display:none; }
     .case-summary-grid { grid-template-columns:1fr 1fr; }
-    .recent-row { grid-template-columns:1fr auto; }
-    .recent-supplier { display:none; }
-    .distribution-row { grid-template-columns:90px 1fr 28px; gap:.45rem; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *:before, *:after { scroll-behavior:auto !important; transition:none !important; animation:none !important; }
@@ -378,27 +365,6 @@ def metric_card(
         <div class="metric-note {h(note_tone)}">{h(note)}</div>
       </div>
     """
-
-
-def render_distribution(title: str, subtitle: str, values: dict[str, int]) -> None:
-    rows = []
-    maximum = max(values.values(), default=0)
-    for label, value in sorted(values.items(), key=lambda item: item[1], reverse=True):
-        width = (value / maximum * 100) if maximum else 0
-        rows.append(
-            f"""
-            <div class="distribution-row">
-              <div class="distribution-label" title="{h(label)}">{h(label.replace("_", " ").title())}</div>
-              <div class="distribution-track"><div class="distribution-fill" style="width:{width:.1f}%"></div></div>
-              <div class="distribution-value">{h(value)}</div>
-            </div>
-            """
-        )
-    content = "".join(rows) or '<div class="empty-mini">No data available yet.</div>'
-    render_html(
-        f'<div class="panel"><div class="section-title">{h(title)}</div>'
-        f'<div class="section-subtitle">{h(subtitle)}</div>{content}</div>',
-    )
 
 
 def render_dashboard_analysis(metrics: dict) -> None:

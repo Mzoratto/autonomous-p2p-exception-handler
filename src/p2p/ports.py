@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from p2p.domain.models import (
     AuditEvent,
     GoodsReceipt,
-    Invoice,
     InvoiceSummary,
     PurchaseOrder,
     Supplier,
@@ -24,14 +23,6 @@ class ERPRepository(Protocol):
     def get_supplier(self, supplier_id: str) -> Supplier | None: ...
 
     def get_previous_invoices(self, supplier_id: str) -> list[InvoiceSummary]: ...
-
-
-class CaseRepository(Protocol):
-    def save_case(self, case_id: str, invoice: Invoice, status: str, state: dict) -> None: ...
-
-    def get_case(self, case_id: str) -> dict | None: ...
-
-    def list_cases(self, status: str | None = None) -> list[dict]: ...
 
 
 class AuditRecorder(Protocol):

@@ -18,7 +18,6 @@ class QuantityVarianceRules(BaseModel):
 
 class ConfidenceRules(BaseModel):
     auto_resolve: float = Field(ge=0, le=1)
-    request_info: float = Field(ge=0, le=1)
 
 
 class RiskRules(BaseModel):

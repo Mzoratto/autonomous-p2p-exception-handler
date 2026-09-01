@@ -5,7 +5,6 @@ quantity_variance:
   tolerance_percent: 1.0
 confidence:
   auto_resolve: 0.90
-  request_info: 0.80
 risk:
   human_review_invoice_value: 50000.00
 duplicate_invoice:
