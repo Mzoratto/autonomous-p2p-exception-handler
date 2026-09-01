@@ -154,34 +154,34 @@ All operational thresholds live in [`config/business_rules.yaml`](config/busines
 
 Local runs resolve that file from the project directory. Packaged deployments use `P2P_RULES_PATH`, which avoids depending on the Python installation path.
 
-## Deliberate boundaries
+## Project scope
 
-The current limitations are intentional and important to state clearly in a portfolio project:
+This repository is an end-to-end engineering prototype focused on one problem: making AI-assisted invoice exception handling controlled, explainable, and auditable. To keep that problem easy to run and evaluate, the project uses clear implementation boundaries:
 
-- ERP records and actions are simulated locally; there are no production connectors or payment capabilities.
-- Ingestion accepts structured JSON. OCR and PDF extraction are a separate document-understanding problem and are outside this version's scope.
-- The local dashboard has no authentication or role-based authorization.
-- SQLite is a good fit for a single-process demonstration, not a horizontally scaled deployment.
-- Live-model quality, latency, and cost depend on the selected model and are not exercised by the offline test suite.
+- synthetic ERP data is accessed through repository adapters; the application cannot post transactions or move money;
+- invoice ingestion uses structured JSON, keeping OCR and PDF extraction independent from the decision workflow;
+- the dashboard is designed for a local, single-user demonstration and does not include authentication or role management;
+- SQLite provides durable local cases and LangGraph checkpoints, while the persistence interfaces can be replaced for a distributed deployment;
+- deterministic mock responses make the full workflow reproducible without an API key, with an optional adapter available for live-model execution; offline tests validate orchestration and policy behavior rather than benchmark provider-specific quality, latency, or cost.
 
-These boundaries keep the project focused on the difficult part it is meant to demonstrate: safe orchestration and decision authority. They should not be hidden or replaced with production claims.
+These choices keep the demonstration self-contained without weakening its core control model: AI can investigate and recommend, but deterministic policy and human reviewers retain decision authority.
 
-## What I would build next
+## Production-readiness roadmap
 
-For a production pilot, I would prioritize the work in this order:
+A production pilot would extend the same architecture in three stages:
 
-1. **Identity and durability** — authenticated users, maker-checker roles, Postgres-backed application/checkpoint storage, and immutable external audit retention.
-2. **Real evidence** — read-only ERP connectors and document extraction with field-level provenance and confidence.
-3. **Operational safety** — approved supplier communication tools, richer entity and jurisdiction policies, traces, evaluation datasets, and live-model cost/latency monitoring.
+1. **Identity and durable controls** — authenticated users, maker-checker roles, Postgres-backed application and checkpoint storage, and immutable external audit retention.
+2. **Enterprise evidence integration** — read-only ERP connectors plus invoice document extraction with field-level provenance and confidence.
+3. **Operational assurance** — approved supplier communication channels, entity- and jurisdiction-specific policies, distributed tracing, evaluation datasets, and live-model quality, latency, and cost monitoring.
 
-For the portfolio itself, the highest-value additions are smaller: a short walkthrough video, a public read-only deployment with synthetic data, and a compact evaluation report showing routing accuracy and failure behavior. Those communicate the engineering better than pretending the demo already has production integrations.
+The next portfolio milestones are a public read-only deployment using synthetic data, a concise product walkthrough, and an evaluation report covering routing accuracy, failure modes, and policy outcomes.
 
-## What this project demonstrates
+## Engineering capabilities demonstrated
 
-- domain-driven boundaries around probabilistic AI;
-- deterministic financial controls and explainable routing;
-- typed model outputs with safe failure behavior;
-- stateful LangGraph orchestration with bounded reflection;
-- human-in-the-loop interrupt and resume;
-- auditable case history and adapter-based infrastructure;
-- testable demo behavior without an API key.
+- Designed domain-driven boundaries that separate probabilistic reasoning from financial decision authority.
+- Implemented deterministic three-way matching, configurable policy controls, and explainable risk routing.
+- Built a stateful LangGraph workflow with typed state, bounded reflection, durable interrupts, and human resume.
+- Enforced structured model outputs with Pydantic validation and fail-closed behavior.
+- Created auditable case histories with adapter-based repositories and persistent checkpoints.
+- Delivered a responsive operations dashboard for ingestion, case inspection, review, and audit exploration.
+- Added reproducible seeded scenarios, offline unit and integration tests, Docker packaging, and GitHub Actions CI.
