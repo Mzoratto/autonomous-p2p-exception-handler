@@ -9,7 +9,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from p2p.application.service import CaseService, create_runtime
-from p2p.domain.models import DecisionType, HumanReview
+from p2p.domain.models import DecisionType, HumanReview, Invoice
 
 NAV_ITEMS = ["Overview", "Process Invoice", "Cases", "Review Queue"]
 
@@ -218,12 +218,21 @@ UI_STYLES = """
   .empty-icon { display:grid; place-items:center; width:42px; height:42px; margin:0 auto .8rem; border-radius:12px; color:var(--blue); background:var(--blue-soft); font-weight:800; }
   .empty-title { color:var(--ink); font-size:.95rem; font-weight:700; }
   .empty-copy { color:var(--muted); font-size:.78rem; margin-top:.35rem; }
-  .stepper { display:flex; gap:.45rem; align-items:center; margin:-.2rem 0 1.15rem; }
-  .step { display:flex; align-items:center; gap:.38rem; color:#98a2b3; font-size:.7rem; font-weight:650; }
-  .step b { display:grid; place-items:center; width:20px; height:20px; border-radius:50%; color:white; background:#98a2b3; font-size:.62rem; }
-  .step.active { color:var(--blue); }
-  .step.active b { background:var(--blue); }
-  .step-line { width:30px; height:1px; background:#d9dfe8; }
+  .st-key-invoice-workflow-stepper { margin:-.25rem 0 1.1rem; }
+  .st-key-invoice-workflow-stepper [data-testid="stRadio"] > label { display:none; }
+  .st-key-invoice-workflow-stepper div[role="radiogroup"] {
+    display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.55rem;
+  }
+  .st-key-invoice-workflow-stepper div[role="radiogroup"] > label {
+    display:flex; justify-content:center; min-height:2.55rem; padding:.58rem .75rem;
+    border:1px solid var(--line); border-radius:9px; background:white;
+    color:#64748b; font-size:.7rem; font-weight:700;
+  }
+  .st-key-invoice-workflow-stepper div[role="radiogroup"] > label > div:first-child { display:none; }
+  .st-key-invoice-workflow-stepper div[role="radiogroup"] > label:has(input:checked) {
+    border-color:var(--blue); background:var(--blue-soft); color:var(--blue);
+    box-shadow:inset 0 0 0 1px rgba(49,91,234,.12);
+  }
   div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); border-radius:var(--radius); box-shadow:var(--shadow); background:white; }
 
   /* Streamlit components */
@@ -264,6 +273,8 @@ UI_STYLES = """
     .dashboard-grid { gap:1rem; }
     .dashboard-grid .panel { min-height:auto; }
     .outcome-row { grid-template-columns:105px 1fr auto; gap:.45rem; }
+    .st-key-invoice-workflow-stepper div[role="radiogroup"] { gap:.35rem; }
+    .st-key-invoice-workflow-stepper div[role="radiogroup"] > label { padding:.5rem .35rem; }
     .architecture-grid { grid-template-columns:1fr; }
     .case-table { min-width:520px; }
     .case-table th:nth-child(4), .case-table td:nth-child(4),
@@ -792,75 +803,192 @@ def dashboard(app: CaseService) -> None:
     )
 
 
-def process_invoice_page(app: CaseService) -> None:
-    page_header(
-        "New workflow",
-        "Process an invoice",
-        "Load a demo or provide invoice JSON, then run the auditable exception workflow.",
-    )
+def queue_invoice_workflow_stage(stage_name: str) -> None:
+    st.session_state["invoice_workflow_pending_stage"] = stage_name
+
+
+def reset_invoice_workflow() -> None:
+    for key in (
+        "invoice_workflow_invoice",
+        "invoice_workflow_case_id",
+        "invoice_workflow_status",
+    ):
+        st.session_state.pop(key, None)
+    queue_invoice_workflow_stage("Input")
+
+
+def navigate_to_page(page: str) -> None:
+    st.session_state["active_page"] = page
+    st.session_state["desktop_navigation"] = page
+    st.session_state["mobile_navigation"] = page
+
+
+def render_validated_invoice(invoice: Invoice) -> None:
     render_html(
-        """
-        <div class="stepper" aria-label="Workflow steps">
-          <div class="step active"><b>1</b>Input</div><div class="step-line"></div>
-          <div class="step"><b>2</b>Analyze</div><div class="step-line"></div>
-          <div class="step"><b>3</b>Resolve</div>
+        f"""
+        <div class="case-summary-grid">
+          <div class="summary-card"><div class="summary-label">Invoice</div><div class="summary-value">{h(invoice.invoice_id)}</div></div>
+          <div class="summary-card"><div class="summary-label">Supplier</div><div class="summary-value" title="{h(invoice.supplier_name)}">{h(invoice.supplier_name)}</div></div>
+          <div class="summary-card"><div class="summary-label">Purchase order</div><div class="summary-value">{h(invoice.po_number or "Missing")}</div></div>
+          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(invoice.currency)} {h(DecimalDisplay(invoice.total))}</div></div>
         </div>
         """,
     )
-    with st.container(border=True):
-        source = st.radio(
-            "Input source",
-            ["Demo scenario", "Upload JSON", "Paste JSON"],
-            horizontal=True,
-        )
-        payload: str | bytes | None = None
-        if source == "Demo scenario":
-            files = sorted(Path("data/demo/invoices").glob("*.json"))
-            if not files:
-                st.warning("Run `make seed` to generate demo invoices.")
-                return
-            chosen = st.selectbox(
-                "Scenario",
-                files,
-                format_func=lambda item: item.stem.replace("_", " ").title(),
-            )
-            payload = chosen.read_text(encoding="utf-8")
-            with st.expander("Preview invoice JSON"):
-                st.code(payload, language="json")
-        elif source == "Upload JSON":
-            upload = st.file_uploader("Invoice JSON", type=["json"])
-            payload = upload.getvalue() if upload else None
-        else:
-            payload = st.text_area("Invoice JSON", height=320)
 
-        if st.button(
-            "Run exception workflow",
+
+def process_invoice_page(app: CaseService) -> None:
+    pending_stage = st.session_state.pop("invoice_workflow_pending_stage", None)
+    if pending_stage:
+        st.session_state["invoice_workflow_stage"] = pending_stage
+    st.session_state.setdefault("invoice_workflow_stage", "Input")
+
+    page_header(
+        "New workflow",
+        "Process an invoice",
+        "Validate the input, run the controlled analysis, and inspect the resulting decision.",
+    )
+    with st.container(key="invoice-workflow-stepper"):
+        workflow_stage = st.radio(
+            "Workflow stage",
+            ["Input", "Analyze", "Resolve"],
+            key="invoice_workflow_stage",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+    if workflow_stage == "Input":
+        with st.container(border=True):
+            render_html('<div class="section-title">1 · Select invoice input</div>')
+            source = st.radio(
+                "Input source",
+                ["Demo scenario", "Upload JSON", "Paste JSON"],
+                horizontal=True,
+            )
+            payload: str | bytes | None = None
+            if source == "Demo scenario":
+                files = sorted(Path("data/demo/invoices").glob("*.json"))
+                if not files:
+                    st.warning("Run `make seed` to generate demo invoices.")
+                    return
+                chosen = st.selectbox(
+                    "Scenario",
+                    files,
+                    format_func=lambda item: item.stem.replace("_", " ").title(),
+                )
+                payload = chosen.read_text(encoding="utf-8")
+                with st.expander("Preview invoice JSON"):
+                    st.code(payload, language="json")
+            elif source == "Upload JSON":
+                upload = st.file_uploader("Invoice JSON", type=["json"])
+                payload = upload.getvalue() if upload else None
+            else:
+                payload = st.text_area("Invoice JSON", height=320)
+
+            if st.button(
+                "Validate and continue",
+                type="primary",
+                disabled=not payload,
+                width="stretch",
+            ):
+                try:
+                    st.session_state["invoice_workflow_invoice"] = app.parse_invoice(payload or "")
+                    st.session_state.pop("invoice_workflow_case_id", None)
+                    st.session_state.pop("invoice_workflow_status", None)
+                    queue_invoice_workflow_stage("Analyze")
+                    st.rerun()
+                except ValidationError as exc:
+                    st.error("Invoice validation failed. Correct the highlighted structure or totals.")
+                    st.code(str(exc), language=None)
+        return
+
+    invoice = st.session_state.get("invoice_workflow_invoice")
+    if invoice is None:
+        st.info("Validate an invoice in the Input stage before continuing.")
+        st.button(
+            "Go to input",
             type="primary",
-            disabled=not payload,
+            on_click=queue_invoice_workflow_stage,
+            args=("Input",),
+        )
+        return
+
+    if workflow_stage == "Analyze":
+        with st.container(border=True):
+            render_html('<div class="section-title">2 · Analyze the exception</div>')
+            st.success("Invoice structure and arithmetic are valid.")
+            render_validated_invoice(invoice)
+            st.caption(
+                "The workflow will retrieve ERP evidence, run deterministic three-way matching, "
+                "invoke bounded AI reasoning only for material exceptions, and apply policy controls."
+            )
+            back, run = st.columns([1, 2])
+            with back:
+                st.button(
+                    "Back to input",
+                    width="stretch",
+                    on_click=queue_invoice_workflow_stage,
+                    args=("Input",),
+                )
+            with run:
+                if st.button("Run analysis", type="primary", width="stretch"):
+                    try:
+                        with st.status("Analyzing invoice exception…", expanded=True) as status:
+                            st.write("Retrieving purchase order, receipt, and supplier evidence")
+                            st.write("Running deterministic three-way matching")
+                            st.write("Applying bounded reasoning and decision policy when required")
+                            result = app.process_invoice(invoice)
+                            status.update(
+                                label="Analysis complete — human review required"
+                                if result["status"] == "PENDING_REVIEW"
+                                else "Analysis and resolution complete",
+                                state="complete",
+                            )
+                        st.session_state["invoice_workflow_case_id"] = result["case_id"]
+                        st.session_state["invoice_workflow_status"] = result["status"]
+                        st.session_state["selected_case"] = result["case_id"]
+                        queue_invoice_workflow_stage("Resolve")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Workflow could not be completed: {type(exc).__name__}: {exc}")
+        return
+
+    case_id = st.session_state.get("invoice_workflow_case_id")
+    if not case_id:
+        st.info("Run the Analyze stage before opening the resolution.")
+        st.button(
+            "Go to analysis",
+            type="primary",
+            on_click=queue_invoice_workflow_stage,
+            args=("Analyze",),
+        )
+        return
+
+    case = app.get_case(case_id) or {}
+    if st.session_state.get("invoice_workflow_status") == "PENDING_REVIEW":
+        st.warning(f"{case_id} is persisted and waiting for a reviewer.")
+    else:
+        st.success(f"{case_id} completed autonomously.")
+    actions = st.columns(2)
+    with actions[0]:
+        st.button(
+            "Process another invoice",
             width="stretch",
-        ):
-            try:
-                invoice = app.parse_invoice(payload or "")
-                with st.status("Executing auditable workflow…", expanded=True) as status:
-                    st.write("Validating invoice and retrieving ERP context")
-                    result = app.process_invoice(invoice)
-                    status.update(
-                        label="Workflow paused for review"
-                        if result["status"] == "PENDING_REVIEW"
-                        else "Workflow completed",
-                        state="complete",
-                    )
-                st.session_state["selected_case"] = result["case_id"]
-                if result["status"] == "PENDING_REVIEW":
-                    st.warning(f"{result['case_id']} is persisted and waiting for a reviewer.")
-                else:
-                    st.success(f"{result['case_id']} completed autonomously.")
-                render_case(app.get_case(result["case_id"]) or {})
-            except ValidationError as exc:
-                st.error("Invoice validation failed. Correct the highlighted structure or totals.")
-                st.code(str(exc), language=None)
-            except Exception as exc:
-                st.error(f"Workflow could not be completed: {type(exc).__name__}: {exc}")
+            on_click=reset_invoice_workflow,
+        )
+    with actions[1]:
+        destination = (
+            "Review Queue"
+            if st.session_state.get("invoice_workflow_status") == "PENDING_REVIEW"
+            else "Cases"
+        )
+        st.button(
+            f"Open {destination.lower()}",
+            type="primary",
+            width="stretch",
+            on_click=navigate_to_page,
+            args=(destination,),
+        )
+    render_case(case)
 
 
 def cases_page(app: CaseService) -> None:
