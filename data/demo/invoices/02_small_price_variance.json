@@ -1,0 +1,20 @@
+{
+  "invoice_id": "INV-SMALL",
+  "supplier_id": "SUP-002",
+  "supplier_name": "Northstar Supply",
+  "po_number": "PO-1003",
+  "invoice_date": "2026-08-15",
+  "currency": "EUR",
+  "line_items": [
+    {
+      "line_id": "1",
+      "description": "Industrial components",
+      "quantity": "100",
+      "unit_price": "25.25",
+      "line_total": "2525.00"
+    }
+  ],
+  "subtotal": "2525.00",
+  "tax": "0",
+  "total": "2525.00"
+}

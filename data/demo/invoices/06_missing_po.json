@@ -1,0 +1,20 @@
+{
+  "invoice_id": "INV-NOPO",
+  "supplier_id": "SUP-001",
+  "supplier_name": "Acme Components",
+  "po_number": null,
+  "invoice_date": "2026-08-15",
+  "currency": "EUR",
+  "line_items": [
+    {
+      "line_id": "1",
+      "description": "Industrial components",
+      "quantity": "2",
+      "unit_price": "100",
+      "line_total": "200"
+    }
+  ],
+  "subtotal": "200",
+  "tax": "0",
+  "total": "200"
+}

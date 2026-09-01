@@ -1,0 +1,20 @@
+{
+  "invoice_id": "INV-HIGH",
+  "supplier_id": "SUP-003",
+  "supplier_name": "Blue River Services",
+  "po_number": "PO-1005",
+  "invoice_date": "2026-08-15",
+  "currency": "EUR",
+  "line_items": [
+    {
+      "line_id": "1",
+      "description": "Industrial components",
+      "quantity": "1",
+      "unit_price": "60000",
+      "line_total": "60000"
+    }
+  ],
+  "subtotal": "60000",
+  "tax": "0",
+  "total": "60000"
+}

@@ -1,0 +1,20 @@
+{
+  "invoice_id": "DUP-001",
+  "supplier_id": "SUP-001",
+  "supplier_name": "Acme Components",
+  "po_number": "PO-1001",
+  "invoice_date": "2026-08-15",
+  "currency": "EUR",
+  "line_items": [
+    {
+      "line_id": "1",
+      "description": "Industrial components",
+      "quantity": "10",
+      "unit_price": "100",
+      "line_total": "1000"
+    }
+  ],
+  "subtotal": "1000",
+  "tax": "0",
+  "total": "1000"
+}

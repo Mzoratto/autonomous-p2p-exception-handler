@@ -1,0 +1,18 @@
+price_variance:
+  auto_approve_percent: 2.0
+  auto_approve_absolute: 25.00
+quantity_variance:
+  tolerance_percent: 1.0
+confidence:
+  auto_resolve: 0.90
+  request_info: 0.80
+risk:
+  human_review_invoice_value: 50000.00
+duplicate_invoice:
+  auto_reject: true
+missing_po:
+  require_human_review: true
+missing_receipt:
+  require_human_review: true
+reflection:
+  max_iterations: 3

@@ -1,0 +1,17 @@
+services:
+  p2p-handler:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-true}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      P2P_DATABASE_URL: sqlite:////app/data/demo/p2p.db
+      P2P_RULES_PATH: /app/config/business_rules.yaml
+    volumes:
+      - p2p-data:/app/data/demo
+
+volumes:
+  p2p-data:

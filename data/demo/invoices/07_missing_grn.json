@@ -1,0 +1,20 @@
+{
+  "invoice_id": "INV-NOGRN",
+  "supplier_id": "SUP-003",
+  "supplier_name": "Blue River Services",
+  "po_number": "PO-1004",
+  "invoice_date": "2026-08-15",
+  "currency": "EUR",
+  "line_items": [
+    {
+      "line_id": "1",
+      "description": "Industrial components",
+      "quantity": "5",
+      "unit_price": "500",
+      "line_total": "2500"
+    }
+  ],
+  "subtotal": "2500",
+  "tax": "0",
+  "total": "2500"
+}
