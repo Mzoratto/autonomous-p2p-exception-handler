@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -32,6 +32,9 @@ class Severity(StrEnum):
 
 
 class DiscrepancyType(StrEnum):
+    SUPPLIER_INELIGIBLE = "SUPPLIER_INELIGIBLE"
+    PO_NOT_OPEN = "PO_NOT_OPEN"
+    QUANTITY_EXCEEDS_ORDER = "QUANTITY_EXCEEDS_ORDER"
     MISSING_PO = "MISSING_PO"
     MISSING_GRN = "MISSING_GRN"
     SUPPLIER_MISMATCH = "SUPPLIER_MISMATCH"
@@ -46,7 +49,7 @@ class DiscrepancyType(StrEnum):
 
 class InvoiceLine(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    line_id: str
+    line_id: str = Field(min_length=1)
     description: str
     quantity: Decimal = Field(gt=0)
     unit_price: Decimal = Field(ge=0)
@@ -54,16 +57,16 @@ class InvoiceLine(BaseModel):
 
     @model_validator(mode="after")
     def validate_line_total(self) -> InvoiceLine:
-        expected = (self.quantity * self.unit_price).quantize(MONEY)
-        if self.line_total.quantize(MONEY) != expected:
+        expected = (self.quantity * self.unit_price).quantize(MONEY, rounding=ROUND_HALF_EVEN)
+        if self.line_total.quantize(MONEY, rounding=ROUND_HALF_EVEN) != expected:
             raise ValueError(f"line_total must equal quantity × unit_price ({expected})")
         return self
 
 
 class Invoice(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    invoice_id: str
-    supplier_id: str
+    invoice_id: str = Field(min_length=1)
+    supplier_id: str = Field(min_length=1)
     supplier_name: str
     po_number: str | None = None
     invoice_date: date
@@ -75,19 +78,27 @@ class Invoice(BaseModel):
 
     @model_validator(mode="after")
     def normalize_and_validate(self) -> Invoice:
+        if len({line.line_id for line in self.line_items}) != len(self.line_items):
+            raise ValueError("Invoice line IDs must be unique")
+        self.invoice_id = self.invoice_id.upper()
         self.currency = self.currency.upper()
         self.supplier_id = self.supplier_id.upper()
         self.po_number = self.po_number.upper() if self.po_number else None
         lines_total = sum((line.line_total for line in self.line_items), Decimal("0"))
-        if self.subtotal.quantize(MONEY) != lines_total.quantize(MONEY):
+        if self.subtotal.quantize(MONEY, rounding=ROUND_HALF_EVEN) != lines_total.quantize(
+            MONEY, rounding=ROUND_HALF_EVEN
+        ):
             raise ValueError("subtotal does not equal the sum of line totals")
-        if self.total.quantize(MONEY) != (self.subtotal + self.tax).quantize(MONEY):
+        if self.total.quantize(MONEY, rounding=ROUND_HALF_EVEN) != (
+            self.subtotal + self.tax
+        ).quantize(MONEY, rounding=ROUND_HALF_EVEN):
             raise ValueError("total does not equal subtotal plus tax")
         return self
 
 
 class PurchaseOrderLine(BaseModel):
-    line_id: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+    line_id: str = Field(min_length=1)
     description: str
     ordered_quantity: Decimal = Field(gt=0)
     unit_price: Decimal = Field(ge=0)
@@ -99,6 +110,12 @@ class PurchaseOrder(BaseModel):
     currency: str
     status: str = "OPEN"
     line_items: list[PurchaseOrderLine]
+
+    @model_validator(mode="after")
+    def unique_lines(self) -> PurchaseOrder:
+        if len({line.line_id for line in self.line_items}) != len(self.line_items):
+            raise ValueError("PO line IDs must be unique")
+        return self
 
 
 class GoodsReceiptLine(BaseModel):
@@ -129,6 +146,7 @@ class InvoiceSummary(BaseModel):
 
 
 class ERPContext(BaseModel):
+    reserved_quantities: dict[str, Decimal] = Field(default_factory=dict)
     purchase_order: PurchaseOrder | None = None
     goods_receipts: list[GoodsReceipt] = Field(default_factory=list)
     supplier: Supplier | None = None
@@ -192,7 +210,8 @@ class PolicyResult(BaseModel):
 
 
 class HumanReview(BaseModel):
-    reviewer: str = "demo-reviewer"
+    model_config = ConfigDict(str_strip_whitespace=True)
+    reviewer: str = Field(default="demo-reviewer", min_length=1)
     action: DecisionType
     comment: str | None = None
     reviewed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

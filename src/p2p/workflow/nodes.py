@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 from langgraph.types import interrupt
@@ -15,6 +17,7 @@ from p2p.domain.models import (
     DecisionType,
     ERPContext,
     HumanReview,
+    InvestigationResult,
     Resolution,
 )
 from p2p.domain.policy import DecisionPolicy
@@ -42,12 +45,29 @@ def _record(
     actor: str,
     data: dict | None = None,
 ) -> None:
+    if event_type in {AuditEventType.CASE_COMPLETED, AuditEventType.HUMAN_DECISION_RECEIVED}:
+        return  # Published atomically with the reconciled case snapshot.
+    provenance = {
+        "rules_sha256": hashlib.sha256(deps.rules.model_dump_json().encode()).hexdigest(),
+        "attempt": state.get("reflection_count", 0),
+    }
+    if state.get("erp_context"):
+        provenance["evidence_sha256"] = hashlib.sha256(
+            state["erp_context"].model_dump_json().encode()
+        ).hexdigest()
+    payload = {**(data or {}), **provenance}
+    event_id = hashlib.sha256(
+        json.dumps(
+            [state["case_id"], event_type.value, payload], sort_keys=True, default=str
+        ).encode()
+    ).hexdigest()
     deps.audit.record(
         AuditEvent(
             case_id=state["case_id"],
+            event_id=event_id,
             event_type=event_type,
             actor=actor,
-            data=data or {},
+            data=payload,
         )
     )
 
@@ -67,6 +87,7 @@ def ingest_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 def load_context_node(state: P2PState, deps: WorkflowDependencies) -> dict:
     invoice = state["invoice"]
     context = ERPContext(
+        reserved_quantities=deps.erp.reserved_quantities(invoice.po_number, state["case_id"]),
         purchase_order=deps.erp.get_purchase_order(invoice.po_number),
         goods_receipts=deps.erp.get_goods_receipts(invoice.po_number),
         supplier=deps.erp.get_supplier(invoice.supplier_id),
@@ -81,6 +102,7 @@ def load_context_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             "po_found": context.purchase_order is not None,
             "receipt_count": len(context.goods_receipts),
             "history_count": len(context.previous_invoices),
+            "context": context.model_dump(mode="json"),
         },
     )
     return {"erp_context": context}
@@ -93,7 +115,7 @@ def match_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         state,
         AuditEventType.MATCH_COMPLETED,
         "three_way_matcher",
-        {"matched": result.matched, "summary": result.summary},
+        result.model_dump(mode="json"),
     )
     if result.discrepancies:
         _record(
@@ -115,10 +137,18 @@ def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
                 "match_result": state["match_result"].model_dump(mode="json"),
             }
         )
+        result = InvestigationResult.model_validate(result)
+        available = {item.discrepancy_id: item for item in state["match_result"].discrepancies}
+        for evidence in result.evidence:
+            fact = available.get(evidence.evidence_id)
+            if (
+                fact is None
+                or evidence.source != "three_way_matcher"
+                or evidence.description != fact.explanation
+            ):
+                raise ValueError("Investigation cites unsupported or altered evidence")
         error = None
     except Exception as exc:
-        from p2p.domain.models import InvestigationResult
-
         result = InvestigationResult(
             root_cause="Model output could not be validated",
             evidence=[],
@@ -132,7 +162,7 @@ def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         state,
         AuditEventType.INVESTIGATION_COMPLETED,
         "ai_investigator",
-        {"root_cause": result.root_cause, "confidence": result.confidence, "error": error},
+        {**result.model_dump(mode="json"), "error": error},
     )
     return {"investigation": result, "model_error": error}
 
@@ -150,6 +180,12 @@ def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
                 "reflection_count": state.get("reflection_count", 0),
             }
         )
+        result = Resolution.model_validate(result)
+        available = {item.discrepancy_id for item in state["match_result"].discrepancies}
+        if not set(result.evidence_refs).issubset(available) or (
+            available and not result.evidence_refs
+        ):
+            raise ValueError("Resolution must cite supplied deterministic evidence")
         error = state.get("model_error")
     except Exception as exc:
         result = Resolution(
@@ -168,7 +204,7 @@ def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         state,
         event_type,
         "ai_resolution_agent",
-        {"action": result.action.value, "confidence": result.confidence, "error": error},
+        {**result.model_dump(mode="json"), "error": error},
     )
     return {"resolution": result, "model_error": error}
 
@@ -182,6 +218,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
                 "resolution": state["resolution"].model_dump(mode="json"),
             }
         )
+        critique = CritiqueResult.model_validate(critique)
         error = state.get("model_error")
     except Exception as exc:
         critique = CritiqueResult(
@@ -199,9 +236,20 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         state,
         AuditEventType.CRITIQUE_PASSED if critique.valid else AuditEventType.CRITIQUE_FAILED,
         "ai_critic",
-        {"issues": critique.issues, "iteration": count, "exhausted": exhausted},
+        {**critique.model_dump(mode="json"), "iteration": count, "exhausted": exhausted},
     )
     return {
+        "resolution": state["resolution"].model_copy(
+            update={
+                "confidence": max(
+                    0,
+                    min(
+                        state["resolution"].confidence,
+                        state["resolution"].confidence + critique.confidence_adjustment,
+                    ),
+                )
+            }
+        ),
         "critique": critique,
         "reflection_count": count,
         "reflection_exhausted": exhausted,
@@ -215,6 +263,7 @@ def policy_check_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         match_result=state["match_result"],
         resolution=state.get("resolution"),
         reflection_exhausted=state.get("reflection_exhausted", False),
+        model_error=state.get("model_error"),
     )
     _record(
         deps,

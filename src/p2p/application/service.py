@@ -4,7 +4,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -12,6 +12,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
+from pydantic import TypeAdapter
 
 from p2p.domain.config import BusinessRules
 from p2p.domain.matching import ThreeWayMatcher
@@ -45,6 +46,7 @@ from p2p.intelligence.providers import MockModelProvider, OpenAIModelProvider
 from p2p.intelligence.services import Critic, Investigator, Resolver
 from p2p.workflow.graph import build_graph
 from p2p.workflow.nodes import WorkflowDependencies
+from p2p.workflow.state import P2PState
 
 
 def _is_true(value: str | bool | None) -> bool:
@@ -100,13 +102,14 @@ def create_runtime(
     load_dotenv(".env.local")
     load_dotenv(".env")
     url = database_url or os.getenv("P2P_DATABASE_URL", "sqlite:///data/demo/p2p.db")
+    rules = BusinessRules.load(resolve_rules_path(rules_path))
     database = Database(url)
     database.create_all()
     repository = SqliteRepository(database)
-    if auto_seed and repository.get_purchase_order("PO-1001") is None:
-        seed_database(database)
+    with repository.command_lock():
+        if auto_seed and not repository.has_data():
+            seed_database(database)
 
-    rules = BusinessRules.load(resolve_rules_path(rules_path))
     use_demo = _is_true(os.getenv("DEMO_MODE", "true")) if demo_mode is None else demo_mode
     provider = MockModelProvider() if use_demo else OpenAIModelProvider()
     deps = WorkflowDependencies(
@@ -170,43 +173,119 @@ class CaseService:
             return Invoice.model_validate_json(payload)
         return Invoice.model_validate(payload)
 
-    def process_invoice(self, invoice: Invoice, case_id: str | None = None) -> dict:
-        case_id = case_id or f"CASE-{uuid4().hex[:10].upper()}"
-        config = {"configurable": {"thread_id": case_id}}
-        result = self.runtime.graph.invoke(
-            {"case_id": case_id, "invoice": invoice},
-            config=config,
-        )
-        status = "PENDING_REVIEW" if result.get("__interrupt__") else "COMPLETED"
-        self.runtime.repository.save_case(case_id, invoice, status, self._clean_state(result))
-        return {"case_id": case_id, "status": status, "state": result}
+    def _result(self, case: dict) -> dict:
+        snapshot = self.runtime.graph.get_state({"configurable": {"thread_id": case["case_id"]}})
+        state = snapshot.values
+        if not state:
+            schemas = get_type_hints(P2PState)
+            state = {
+                key: TypeAdapter(schemas[key]).validate_python(value)
+                for key, value in case["state"].items()
+                if key in schemas
+            }
+        return {"case_id": case["case_id"], "status": case["status"], "state": state}
 
-    def review_case(self, case_id: str, review: HumanReview) -> dict:
-        case = self.runtime.repository.get_case(case_id)
-        if not case:
-            raise LookupError(f"No persisted case exists for {case_id}")
-        if case["status"] != "PENDING_REVIEW":
-            raise ValueError("Only pending-review cases can be resumed")
-        config = {"configurable": {"thread_id": case_id}}
-        result = self.runtime.graph.invoke(
-            Command(resume=review.model_dump(mode="json")),
-            config=config,
-        )
-        status = "PENDING_REVIEW" if result.get("__interrupt__") else "COMPLETED"
-        invoice = Invoice.model_validate(case["invoice"])
-        self.runtime.repository.save_case(case_id, invoice, status, self._clean_state(result))
-        return {"case_id": case_id, "status": status, "state": result}
+    def _reconcile(self, case_id: str) -> dict:
+        repository = self.runtime.repository
+        case = repository.get_case(case_id)
+        snapshot = self.runtime.graph.get_state({"configurable": {"thread_id": case_id}})
+        if not snapshot.values:
+            if case["status"] == "PENDING_REVIEW":
+                raise ValueError(
+                    "Review checkpoint is missing; restore the checkpoint database before reviewing"
+                )
+            return case
+        state = self._clean_state(snapshot.values)
+        if (
+            state.get("case_id") != case_id
+            or state["invoice"].model_dump(mode="json") != case["invoice"]
+        ):
+            raise ValueError("Checkpoint invoice identity does not match the persisted case")
+        submitted = repository.submitted_review(case_id)
+        if (
+            submitted
+            and state.get("human_review")
+            and state["human_review"].model_dump(mode="json") != submitted
+        ):
+            raise ValueError("Checkpoint review conflicts with the durable submitted decision")
+        if state.get("outcome") and not snapshot.next:
+            CaseOutcome.model_validate(state["outcome"])
+            status = "COMPLETED"
+        elif any(task.interrupts for task in snapshot.tasks):
+            status = "PENDING_REVIEW"
+        else:
+            status = "PROCESSING"
+        repository.save_case(case_id, state["invoice"], status, state)
+        return repository.get_case(case_id)
+
+    def process_invoice(self, invoice: Invoice, case_id: str | None = None) -> dict:
+        invoice = Invoice.model_validate(invoice.model_dump())
+        repository = self.runtime.repository
+        with repository.command_lock():
+            case_id, _ = repository.claim_case(
+                case_id or f"CASE-{uuid4().hex[:10].upper()}", invoice
+            )
+            config = {"configurable": {"thread_id": case_id}}
+            case = self._reconcile(case_id)
+            if case["status"] != "PROCESSING":
+                return self._result(case)
+            snapshot = self.runtime.graph.get_state(config)
+            self.runtime.graph.invoke(
+                {"case_id": case_id, "invoice": invoice} if not snapshot.values else None,
+                config=config,
+            )
+            return self._result(self._reconcile(case_id))
+
+    def review_case(
+        self, case_id: str, review: HumanReview, checkpoint_id: str | None = None
+    ) -> dict:
+        review = HumanReview.model_validate(review.model_dump())
+        repository = self.runtime.repository
+        with repository.command_lock():
+            if not repository.get_case(case_id):
+                raise LookupError(f"No persisted case exists for {case_id}")
+            case = self._reconcile(case_id)
+            if case["status"] != "PENDING_REVIEW":
+                raise ValueError(
+                    "Only pending-review cases can be resumed; any committed outcome has been recovered"
+                )
+            config = {"configurable": {"thread_id": case_id}}
+            snapshot = self.runtime.graph.get_state(config)
+            revision = snapshot.config["configurable"]["checkpoint_id"]
+            if checkpoint_id is not None and checkpoint_id != revision:
+                raise ValueError("Stale review checkpoint; reload the case before reviewing")
+            if not any(task.interrupts for task in snapshot.tasks) or snapshot.next != (
+                "human_review",
+            ):
+                raise ValueError("No matching active human-review interrupt")
+            submitted = repository.bind_review(case_id, review.model_dump(mode="json"), revision)
+            self.runtime.graph.invoke(Command(resume=submitted), config=config)
+            return self._result(self._reconcile(case_id))
 
     def get_case(self, case_id: str) -> dict | None:
-        case = self.runtime.repository.get_case(case_id)
-        if case:
-            case["audit"] = [
-                event.model_dump(mode="json") for event in self.runtime.repository.for_case(case_id)
-            ]
-        return case
+        with self.runtime.repository.command_lock():
+            case = self.runtime.repository.get_case(case_id)
+            if case:
+                case = self._reconcile(case_id)
+                snapshot = self.runtime.graph.get_state({"configurable": {"thread_id": case_id}})
+                case["checkpoint_id"] = (
+                    snapshot.config["configurable"].get("checkpoint_id")
+                    if snapshot.config
+                    else None
+                )
+                case["submitted_review"] = self.runtime.repository.submitted_review(case_id)
+                case["audit"] = [
+                    event.model_dump(mode="json")
+                    for event in self.runtime.repository.for_case(case_id)
+                ]
+            return case
 
     def list_cases(self, status: str | None = None) -> list[dict]:
-        return self.runtime.repository.list_cases(status)
+        with self.runtime.repository.command_lock():
+            cases = [
+                self._reconcile(item["case_id"]) for item in self.runtime.repository.list_cases()
+            ]
+            return [case for case in cases if status is None or case["status"] == status]
 
     def metrics(self) -> dict[str, Any]:
         cases = self.list_cases()

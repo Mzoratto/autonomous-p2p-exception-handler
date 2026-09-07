@@ -2,14 +2,15 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH" \
     DEMO_MODE=true \
     P2P_DATABASE_URL=sqlite:////app/data/demo/p2p.db \
     P2P_RULES_PATH=/app/config/business_rules.yaml
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir uv==0.11.29 && uv sync --frozen --no-dev
 COPY config ./config
 COPY .streamlit ./.streamlit
 COPY app.py ./app.py

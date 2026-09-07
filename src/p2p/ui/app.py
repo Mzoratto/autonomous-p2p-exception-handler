@@ -419,12 +419,12 @@ def render_dashboard_analysis(metrics: dict) -> None:
         <div class="dashboard-grid">
           <section class="panel" aria-label="Resolution outcomes">
             <div class="panel-kicker">Resolution outcomes</div>
-            <div class="stacked-bar">{''.join(segments)}</div>
-            {''.join(outcome_rows)}
+            <div class="stacked-bar">{"".join(segments)}</div>
+            {"".join(outcome_rows)}
           </section>
           <section class="panel" aria-label="Exception breakdown">
             <div class="panel-kicker">Exception breakdown</div>
-            {''.join(exception_rows)}
+            {"".join(exception_rows)}
           </section>
         </div>
         """,
@@ -491,7 +491,9 @@ def render_recent_cases(cases: list[dict]) -> None:
             """,
         )
     if not rows:
-        rows.append('<tr><td colspan="7" class="empty-mini">Processed cases will appear here.</td></tr>')
+        rows.append(
+            '<tr><td colspan="7" class="empty-mini">Processed cases will appear here.</td></tr>'
+        )
     render_html(
         f"""
         <section class="panel" aria-label="Recent cases">
@@ -500,7 +502,7 @@ def render_recent_cases(cases: list[dict]) -> None:
             <table class="case-table">
               <colgroup><col style="width:17%"><col style="width:18%"><col style="width:15%"><col style="width:17%"><col style="width:15%"><col style="width:12%"><col style="width:6%"></colgroup>
               <thead><tr><th>Case ID</th><th>Vendor</th><th>Amount</th><th>Type</th><th>Status</th><th>Assigned</th><th>Age</th></tr></thead>
-              <tbody>{''.join(rows)}</tbody>
+              <tbody>{"".join(rows)}</tbody>
             </table>
           </div>
         </section>
@@ -641,7 +643,7 @@ def render_case(case: dict) -> None:
             render_html(
                 f"""
                 <div class="decision-card">
-                  <div class="decision-label">Investigation</div>
+                  <div class="decision-label">AI interpretation · verify against evidence</div>
                   <div class="decision-title">{h(investigation["root_cause"])}</div>
                   <div class="decision-copy"><strong>Evidence</strong> · {h(evidence or "None cited")}</div>
                   {f'<div class="decision-copy"><strong>Missing</strong> · {h("; ".join(missing))}</div>' if missing else ""}
@@ -661,6 +663,15 @@ def render_case(case: dict) -> None:
                 </div>
                 """,
             )
+        proposals = [
+            event
+            for event in case.get("audit", [])
+            if event["event_type"] in {"RESOLUTION_PROPOSED", "RESOLUTION_REVISED"}
+        ]
+        if proposals:
+            with st.expander("Recommendation history"):
+                for proposal in proposals:
+                    st.json(proposal)
         if state.get("critique"):
             critique = state["critique"]
             verdict = "Valid" if critique["valid"] else "Revision required"
@@ -863,7 +874,9 @@ def process_invoice_page(app: CaseService) -> None:
                     queue_invoice_workflow_stage("Analyze")
                     st.rerun()
                 except ValidationError as exc:
-                    st.error("Invoice validation failed. Correct the highlighted structure or totals.")
+                    st.error(
+                        "Invoice validation failed. Correct the highlighted structure or totals."
+                    )
                     st.code(str(exc), language=None)
         return
 
@@ -930,10 +943,20 @@ def process_invoice_page(app: CaseService) -> None:
         return
 
     case = app.get_case(case_id) or {}
-    if st.session_state.get("invoice_workflow_status") == "PENDING_REVIEW":
+    if case.get("status") == "PENDING_REVIEW":
         st.warning(f"{case_id} is persisted and waiting for a reviewer.")
     else:
-        st.success(f"{case_id} completed autonomously.")
+        source = case.get("state", {}).get("outcome", {}).get("source")
+        if case.get("status") == "COMPLETED":
+            st.success(
+                f"{case_id} completed autonomously."
+                if source == "AUTONOMOUS"
+                else f"{case_id} completed after human review."
+            )
+        else:
+            st.warning(
+                f"{case_id} requires recovery. Resubmit the same invoice to resume processing."
+            )
     actions = st.columns(2)
     with actions[0]:
         st.button(
@@ -942,11 +965,7 @@ def process_invoice_page(app: CaseService) -> None:
             on_click=reset_invoice_workflow,
         )
     with actions[1]:
-        destination = (
-            "Review Queue"
-            if st.session_state.get("invoice_workflow_status") == "PENDING_REVIEW"
-            else "Cases"
-        )
+        destination = "Review Queue" if case.get("status") == "PENDING_REVIEW" else "Cases"
         st.button(
             f"Open {destination.lower()}",
             type="primary",
@@ -1013,6 +1032,11 @@ def review_page(app: CaseService) -> None:
     render_case(case)
     st.divider()
     render_html('<div class="section-title">Reviewer decision</div>')
+    if case.get("submitted_review"):
+        st.info(
+            "A review is already durably submitted. Retry the same reviewer, action and note to finish recovery."
+        )
+        st.json(case["submitted_review"])
     with st.container(border=True):
         action = st.radio(
             "Action",
@@ -1030,6 +1054,7 @@ def review_page(app: CaseService) -> None:
                 result = app.review_case(
                     selected["case_id"],
                     HumanReview(reviewer=reviewer, action=action, comment=comment or None),
+                    checkpoint_id=case["checkpoint_id"],
                 )
                 st.success(f"Workflow resumed and completed: {result['state']['outcome'].action}")
                 st.rerun()
@@ -1061,7 +1086,9 @@ def main() -> None:
             label_visibility="collapsed",
         )
         mode = "Demo" if app.runtime.demo_mode else "Live"
-        model = "Mock provider" if app.runtime.demo_mode else os.getenv("OPENAI_MODEL", "Configured")
+        model = (
+            "Mock provider" if app.runtime.demo_mode else os.getenv("OPENAI_MODEL", "Configured")
+        )
         render_html(
             f"""
             <div class="runtime-card">

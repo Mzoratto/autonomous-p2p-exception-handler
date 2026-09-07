@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -16,6 +17,10 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class ERPRepository(Protocol):
+    def reserved_quantities(
+        self, po_number: str | None, exclude_case_id: str
+    ) -> dict[str, Decimal]: ...
+
     def get_purchase_order(self, po_number: str | None) -> PurchaseOrder | None: ...
 
     def get_goods_receipts(self, po_number: str | None) -> list[GoodsReceipt]: ...
