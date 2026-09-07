@@ -1,8 +1,7 @@
-.PHONY: setup seed run test lint
+.PHONY: setup seed run test lint audit
 
 setup:
-	uv venv --python 3.11
-	uv pip install --python .venv/bin/python -e '.[dev]'
+	uv sync --frozen --extra dev --python 3.11
 
 seed:
 	.venv/bin/python -m p2p.infrastructure.database
@@ -15,3 +14,6 @@ test:
 
 lint:
 	.venv/bin/ruff check .
+
+audit:
+	uvx pip-audit --path "$$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"

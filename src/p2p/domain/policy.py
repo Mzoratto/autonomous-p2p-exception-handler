@@ -24,6 +24,7 @@ class DecisionPolicy:
         match_result: MatchResult,
         resolution: Resolution | None,
         reflection_exhausted: bool = False,
+        model_error: str | None = None,
     ) -> PolicyResult:
         reasons: list[str] = []
         triggered: list[str] = []
@@ -37,6 +38,24 @@ class DecisionPolicy:
                 triggered_rules=["duplicate_invoice.auto_reject"],
                 enforced_action=DecisionType.REJECT,
             )
+
+        if model_error:
+            reasons.append("An unresolved model or evidence validation failure requires review.")
+            triggered.append("model_error")
+        if not match_result.matched or any(
+            item.type != DiscrepancyType.PRICE_VARIANCE
+            or item.severity not in {Severity.INFO, Severity.WARNING}
+            for item in match_result.discrepancies
+        ):
+            reasons.append("Deterministic autonomous eligibility is not established.")
+            triggered.append("deterministic_eligibility")
+        if resolution and resolution.action not in {
+            DecisionType.APPROVE,
+            DecisionType.REJECT,
+            DecisionType.REQUEST_INFO,
+        }:
+            reasons.append("The proposed action requires human review.")
+            triggered.append("allowed_action")
 
         if invoice.total >= self.rules.risk.human_review_invoice_value:
             reasons.append("Invoice value meets or exceeds the human-review threshold.")

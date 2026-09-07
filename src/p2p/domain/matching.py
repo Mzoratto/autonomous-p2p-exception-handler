@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 
 from p2p.domain.config import BusinessRules
 from p2p.domain.models import (
@@ -15,10 +15,11 @@ from p2p.domain.models import (
 )
 
 
-def variance(expected: Decimal, actual: Decimal) -> tuple[Decimal, Decimal]:
+def variance(expected: Decimal, actual: Decimal) -> tuple[Decimal, Decimal | None]:
     absolute = actual - expected
-    percent = Decimal("0") if expected == 0 else (absolute / expected * Decimal("100"))
-    return absolute.quantize(Decimal("0.01")), percent.quantize(Decimal("0.01"))
+    # A percentage against a zero base is undefined, never evidence of a match.
+    percent = None if expected == 0 else absolute / expected * Decimal("100")
+    return absolute, percent
 
 
 class ThreeWayMatcher:
@@ -30,6 +31,18 @@ class ThreeWayMatcher:
     def match(self, invoice: Invoice, context: ERPContext) -> MatchResult:
         discrepancies = self._arithmetic_discrepancies(invoice)
         po = context.purchase_order
+        if (
+            context.supplier is None
+            or not context.supplier.active
+            or context.supplier.supplier_id != invoice.supplier_id
+        ):
+            discrepancies.append(
+                Discrepancy(
+                    type=DiscrepancyType.SUPPLIER_INELIGIBLE,
+                    severity=Severity.CRITICAL,
+                    explanation="Supplier master is missing, inactive, or inconsistent.",
+                )
+            )
 
         duplicate = next(
             (item for item in context.previous_invoices if item.invoice_id == invoice.invoice_id),
@@ -56,6 +69,15 @@ class ThreeWayMatcher:
             )
             return self._result(invoice, discrepancies)
 
+        if po.status != "OPEN":
+            discrepancies.append(
+                Discrepancy(
+                    type=DiscrepancyType.PO_NOT_OPEN,
+                    severity=Severity.CRITICAL,
+                    explanation="Only OPEN purchase orders are eligible for autonomous approval.",
+                )
+            )
+
         if po.supplier_id != invoice.supplier_id:
             discrepancies.append(
                 Discrepancy(
@@ -78,6 +100,8 @@ class ThreeWayMatcher:
 
         received_by_line: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         for receipt in context.goods_receipts:
+            if receipt.po_number != po.po_number:
+                continue
             for line in receipt.line_items:
                 received_by_line[line.po_line_id] += line.received_quantity
 
@@ -104,10 +128,26 @@ class ThreeWayMatcher:
                 )
                 continue
 
+            reserved = context.reserved_quantities.get(invoice_line.line_id, Decimal("0"))
+            remaining_order = max(Decimal("0"), po_line.ordered_quantity - reserved)
+            if invoice_line.quantity > remaining_order:
+                discrepancies.append(
+                    Discrepancy(
+                        type=DiscrepancyType.QUANTITY_EXCEEDS_ORDER,
+                        severity=Severity.CRITICAL,
+                        line_id=invoice_line.line_id,
+                        expected=remaining_order,
+                        actual=invoice_line.quantity,
+                        explanation="Invoice exceeds remaining ordered quantity.",
+                    )
+                )
+
             price_abs, price_pct = variance(po_line.unit_price, invoice_line.unit_price)
             if price_abs != 0:
                 within_tolerance = (
-                    abs(price_pct) <= self.rules.price_variance.auto_approve_percent
+                    (po_line.unit_price != 0)
+                    and abs(price_abs) * 100
+                    <= po_line.unit_price * self.rules.price_variance.auto_approve_percent
                     and abs(price_abs * invoice_line.quantity)
                     <= self.rules.price_variance.auto_approve_absolute
                 )
@@ -121,17 +161,17 @@ class ThreeWayMatcher:
                         variance_absolute=price_abs,
                         variance_percent=price_pct,
                         explanation=(
-                            f"Unit price variance is {price_pct}% ({price_abs} {invoice.currency}); "
+                            f"Unit price variance is {price_pct if price_pct is not None else 'undefined (zero base)'} ({price_abs} {invoice.currency}); "
                             f"{'within' if within_tolerance else 'outside'} configured tolerance."
                         ),
                     )
                 )
 
-            received = received_by_line[invoice_line.line_id]
+            received = max(Decimal("0"), received_by_line[invoice_line.line_id] - reserved)
             qty_abs, qty_pct = variance(received, invoice_line.quantity)
-            if (
-                context.goods_receipts
-                and abs(qty_pct) > self.rules.quantity_variance.tolerance_percent
+            if context.goods_receipts and (
+                received == 0
+                or abs(qty_abs) * 100 > received * self.rules.quantity_variance.tolerance_percent
             ):
                 discrepancy_type = (
                     DiscrepancyType.QUANTITY_EXCEEDS_RECEIPT
@@ -149,7 +189,7 @@ class ThreeWayMatcher:
                         variance_percent=qty_pct,
                         explanation=(
                             f"Invoiced quantity {invoice_line.quantity} differs from received "
-                            f"quantity {received} by {qty_pct}%."
+                            f"quantity {received}; variance percent: {qty_pct if qty_pct is not None else 'undefined (zero base)'}."
                         ),
                     )
                 )
@@ -161,8 +201,8 @@ class ThreeWayMatcher:
         """Recheck invoice arithmetic in case validated data was later corrupted."""
         discrepancies: list[Discrepancy] = []
         for line in invoice.line_items:
-            expected = (line.quantity * line.unit_price).quantize(MONEY)
-            actual = line.line_total.quantize(MONEY)
+            expected = (line.quantity * line.unit_price).quantize(MONEY, rounding=ROUND_HALF_EVEN)
+            actual = line.line_total.quantize(MONEY, rounding=ROUND_HALF_EVEN)
             if actual != expected:
                 absolute, percent = variance(expected, actual)
                 discrepancies.append(
@@ -183,8 +223,8 @@ class ThreeWayMatcher:
 
         expected_subtotal = sum(
             (line.line_total for line in invoice.line_items), Decimal("0")
-        ).quantize(MONEY)
-        actual_subtotal = invoice.subtotal.quantize(MONEY)
+        ).quantize(MONEY, rounding=ROUND_HALF_EVEN)
+        actual_subtotal = invoice.subtotal.quantize(MONEY, rounding=ROUND_HALF_EVEN)
         if actual_subtotal != expected_subtotal:
             absolute, percent = variance(expected_subtotal, actual_subtotal)
             discrepancies.append(
@@ -202,8 +242,8 @@ class ThreeWayMatcher:
                 )
             )
 
-        expected_total = (invoice.subtotal + invoice.tax).quantize(MONEY)
-        actual_total = invoice.total.quantize(MONEY)
+        expected_total = (invoice.subtotal + invoice.tax).quantize(MONEY, rounding=ROUND_HALF_EVEN)
+        actual_total = invoice.total.quantize(MONEY, rounding=ROUND_HALF_EVEN)
         if actual_total != expected_total:
             absolute, percent = variance(expected_total, actual_total)
             discrepancies.append(

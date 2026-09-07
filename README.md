@@ -97,9 +97,7 @@ The exact-match scenario provides the opposite path. Because there is nothing am
 * `config/business_rules.yaml` — financial tolerances, risk thresholds, hard controls, and the reflection limit.
 * `tests` — unit, integration, and end-to-end workflow coverage.
 
-LangGraph is useful here because the problem benefits from explicit state transitions, a genuine Resolver → Critic revision loop, and a durable pause/resume boundary for human review.
-
-The application also stores its own case snapshots rather than treating LangGraph checkpoint internals as a query API.
+LangGraph is used because this problem benefits from explicit state transitions, a real Resolver → Critic loop, and a durable pause/resume boundary. The application keeps case snapshots for queries and reconciles them against durable checkpoints before returning case views. Reviewer submissions are journaled before resume; final decision audit events and snapshots commit together.
 
 ## Run locally
 
@@ -112,9 +110,7 @@ make seed
 make run
 ```
 
-Open http://localhost:8501.
-
-The seed command creates the SQLite database and ten JSON invoice scenarios used by the dashboard.
+Open <http://localhost:8501>. The seed command inserts missing ERP fixtures and writes ten JSON invoice scenarios without deleting existing cases or audit history. Startup seeds only empty storage. `make setup` installs the frozen `uv.lock` resolution.
 
 ### Demo mode
 
@@ -144,34 +140,17 @@ Never commit a real API key. `.env.local` is ignored by Git.
 docker compose up --build
 ```
 
-The dashboard will be available at http://localhost:8501.
-
-A named volume keeps SQLite case and checkpoint state across container restarts. Local credential files are not copied into the image.
+The dashboard is available at <http://localhost:8501>. Compose binds the unauthenticated dashboard to host loopback only. A named volume is configured to retain SQLite case and checkpoint state between container restarts; image startup and volume survival require a Docker runtime check. The image does not copy local credential files.
 
 ## Test and lint
 
 ```bash
 make test
 make lint
+make audit  # dependency advisory lookup; requires network
 ```
 
-The test suite runs without network access.
-
-Coverage includes:
-
-* financial validation;
-* post-validation arithmetic corruption;
-* matching scenarios;
-* tolerance policy;
-* duplicate protection;
-* workflow routing;
-* bounded reflection;
-* malformed model output;
-* SQLite adapters;
-* durable interrupts;
-* human resume behavior.
-
-GitHub Actions runs the same lint and test checks on pushes and pull requests.
+The test suite runs without network access. It covers financial validation, post-validation arithmetic corruption, matching scenarios, tolerance policy, duplicate protection, workflow routing, bounded reflection, malformed model output, SQLite adapters, durable interrupts, and human resume behavior. GitHub Actions repeats the lint, test and dependency advisory checks on pushes and pull requests. Audit regression coverage includes hostile typed model output, fractional thresholds, concurrent ingestion/review, save failures, restart recovery and post-review UI navigation. See [audit remediation and recovery](docs/audit-remediation.md).
 
 ## Included scenarios
 
@@ -188,9 +167,21 @@ GitHub Actions runs the same lint and test checks on pushes and pull requests.
 | Supplier mismatch            | Hard-control review                            |
 | Exact but high-value invoice | Value-threshold review                         |
 
+Each scenario's expected route assumes fresh storage. Processing an identical invoice again returns its original case. Different invoices sharing the same PO consume the same remaining capacity, so running multiple scenarios together can intentionally change later routes.
+
+## Financial and evidence rules
+
+Autonomous approval requires a deterministic match, an active matching supplier, an OPEN PO, sufficient remaining ordered/received quantities, and no unresolved model failure. Only known non-material price discrepancies may pass the final allowlist. Duplicate identities from seeded history are rejected; newly submitted identities are claimed atomically and replayed idempotently.
+
+Pending and failed cases reserve quantities. APPROVE and terminal REQUEST_INFO retain reservations; REJECT releases them. Partial invoices outside the receipt tolerance require a reviewer. The quantity tolerance applies to receipt variance, while the PO order limit is strict. CLOSED, cancelled and unknown PO states require review. Supplier `risk_rating` is display-only; supplier existence and `active` are enforced.
+
+Threshold comparisons retain Decimal precision. Monetary totals use two decimal places with ROUND_HALF_EVEN; this demo does not implement per-currency precision or tax policy. Investigator evidence must copy supplied matcher records exactly, and all recommendation references must resolve to them. Model narratives remain interpretations, not verified amendments or receipts. Critic confidence adjustments can only reduce effective confidence.
+
 ## Configuration
 
 Operational thresholds live in [`config/business_rules.yaml`](config/business_rules.yaml).
+
+Duplicate rejection and missing-document review switches must remain true; startup rejects unsafe combinations.
 
 This includes price and quantity tolerances, confidence gates, high-value review rules, duplicate handling, missing-document controls, and the reflection limit.
 
@@ -210,7 +201,7 @@ To keep the project self-contained and easy to evaluate, I made a few deliberate
 * SQLite provides durable local case storage and LangGraph checkpoints, while the persistence interfaces are designed so they can be replaced in a distributed deployment.
 * Deterministic mock responses make the complete workflow reproducible without an API key. A live-model adapter is also available, while offline tests focus on orchestration and policy behavior rather than provider-specific quality, latency, or cost.
 
-These constraints keep the demonstration practical without weakening the main control model: AI can investigate, interpret, and recommend, but deterministic policy and human reviewers retain decision authority.
+The controls are verified within this local simulation. They do not establish production ERP provenance, distributed transaction guarantees, or live-model reliability. See the recovery contract and limitations in the remediation report.
 
 ## Production-readiness roadmap
 

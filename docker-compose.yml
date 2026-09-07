@@ -2,7 +2,7 @@ services:
   p2p-handler:
     build: .
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     environment:
       DEMO_MODE: ${DEMO_MODE:-true}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}

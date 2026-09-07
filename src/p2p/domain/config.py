@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -25,15 +26,15 @@ class RiskRules(BaseModel):
 
 
 class DuplicateRules(BaseModel):
-    auto_reject: bool = True
+    auto_reject: Literal[True] = True
 
 
 class MissingPORules(BaseModel):
-    require_human_review: bool = True
+    require_human_review: Literal[True] = True
 
 
 class MissingReceiptRules(BaseModel):
-    require_human_review: bool = True
+    require_human_review: Literal[True] = True
 
 
 class ReflectionRules(BaseModel):

@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import threading
+from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import Boolean, DateTime, String, Text, create_engine, delete, select
+from sqlalchemy import Boolean, DateTime, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from p2p.domain.models import (
     AuditEvent,
+    AuditEventType,
     GoodsReceipt,
     GoodsReceiptLine,
     Invoice,
@@ -66,6 +70,19 @@ class CaseRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class CaseCommandRow(Base):
+    __tablename__ = "case_commands"
+    case_id: Mapped[str] = mapped_column(String, primary_key=True)
+    identity: Mapped[str] = mapped_column(String, unique=True)
+    invoice_payload: Mapped[str] = mapped_column(Text)
+    review_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checkpoint_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+_LOCKS: dict[str, Any] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
 class AuditEventRow(Base):
     __tablename__ = "audit_events"
     event_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -106,6 +123,116 @@ class Database:
 class SqliteRepository:
     def __init__(self, database: Database):
         self.database = database
+
+    @contextmanager
+    def command_lock(self):
+        """Serialize commands across threads/processes sharing this local SQLite file."""
+        path = str(Path(self.database.url.removeprefix("sqlite:///")).resolve())
+        with _LOCKS_GUARD:
+            lock = _LOCKS.setdefault(path, threading.RLock())
+        with lock, open(path + ".commands.lock", "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def has_data(self) -> bool:
+        with self.database.session_factory() as session:
+            return any(
+                session.scalar(select(model).limit(1)) is not None
+                for model in (
+                    CaseRow,
+                    CaseCommandRow,
+                    SupplierRow,
+                    PurchaseOrderRow,
+                    GoodsReceiptRow,
+                    InvoiceHistoryRow,
+                    AuditEventRow,
+                )
+            )
+
+    def claim_case(self, case_id: str, invoice: Invoice) -> tuple[str, bool]:
+        payload = to_json(invoice)
+        identity = to_json(
+            [invoice.supplier_id.strip().upper(), invoice.invoice_id.strip().upper()]
+        )
+        with self.database.session_factory() as session:
+            command = session.get(CaseCommandRow, case_id)
+            if command and command.invoice_payload != payload:
+                raise ValueError("Case ID is permanently bound to different invoice content")
+            # Include pre-migration cases; never silently combine legacy duplicates.
+            for row in session.scalars(select(CaseRow)).all():
+                existing = Invoice.model_validate_json(row.invoice_payload)
+                same_identity = (
+                    existing.supplier_id.strip().upper(),
+                    existing.invoice_id.strip().upper(),
+                ) == (invoice.supplier_id, invoice.invoice_id)
+                if row.case_id == case_id or same_identity:
+                    if to_json(existing) != payload:
+                        raise ValueError(
+                            "Invoice or case identity already exists with different content"
+                        )
+                    return row.case_id, False
+            session.add(CaseCommandRow(case_id=case_id, identity=identity, invoice_payload=payload))
+            session.add(
+                CaseRow(
+                    case_id=case_id,
+                    invoice_id=invoice.invoice_id,
+                    status="PROCESSING",
+                    invoice_payload=invoice.model_dump_json(),
+                    state_payload="{}",
+                )
+            )
+            session.commit()
+        return case_id, True
+
+    def bind_review(self, case_id: str, review: dict, checkpoint_id: str) -> dict:
+        with self.database.session_factory() as session:
+            command = session.get(CaseCommandRow, case_id)
+            if command is None:
+                case = session.get(CaseRow, case_id)
+                invoice = Invoice.model_validate_json(case.invoice_payload)
+                command = CaseCommandRow(
+                    case_id=case_id,
+                    identity=to_json([invoice.supplier_id, invoice.invoice_id]),
+                    invoice_payload=to_json(invoice),
+                )
+                session.add(command)
+            if command.review_payload:
+                previous = json.loads(command.review_payload)
+                if any(previous.get(k) != review.get(k) for k in ("action", "reviewer", "comment")):
+                    raise ValueError(
+                        "A different review is already durably submitted for this case"
+                    )
+                if command.checkpoint_id != checkpoint_id:
+                    raise ValueError("Submitted review belongs to a different checkpoint revision")
+                return previous
+            command.review_payload = to_json(review)
+            command.checkpoint_id = checkpoint_id
+            session.commit()
+            return review
+
+    def submitted_review(self, case_id: str) -> dict | None:
+        with self.database.session_factory() as session:
+            row = session.get(CaseCommandRow, case_id)
+            return json.loads(row.review_payload) if row and row.review_payload else None
+
+    def reserved_quantities(
+        self, po_number: str | None, exclude_case_id: str
+    ) -> dict[str, Decimal]:
+        quantities: dict[str, Decimal] = {}
+        for case in self.list_cases():
+            if case["case_id"] == exclude_case_id or case["invoice"].get("po_number") != po_number:
+                continue
+            if case["state"].get("outcome", {}).get("action") == "REJECT":
+                continue
+            # Pending, interrupted, failed, and REQUEST_INFO cases retain reservations.
+            for line in case["invoice"]["line_items"]:
+                quantities[line["line_id"]] = quantities.get(
+                    line["line_id"], Decimal("0")
+                ) + Decimal(line["quantity"])
+        return quantities
 
     def get_purchase_order(self, po_number: str | None) -> PurchaseOrder | None:
         if not po_number:
@@ -155,9 +282,37 @@ class SqliteRepository:
                 )
                 session.add(row)
             else:
-                row.status = status
-                row.state_payload = to_json(state)
-                row.updated_at = datetime.utcnow()
+                if to_json(Invoice.model_validate_json(row.invoice_payload)) != to_json(invoice):
+                    raise ValueError("Case invoice content is immutable")
+                payload = to_json(state)
+                if row.status != status or row.state_payload != payload:
+                    row.status = status
+                    row.state_payload = payload
+                    row.updated_at = datetime.utcnow()
+            if status == "COMPLETED":
+                outcome = state.get("outcome")
+                if not outcome:
+                    raise ValueError("Completed case requires a validated outcome")
+                for event_type, data in [
+                    (AuditEventType.HUMAN_DECISION_RECEIVED, state.get("human_review")),
+                    (AuditEventType.CASE_COMPLETED, outcome),
+                ]:
+                    if not data:
+                        continue
+                    event_id = f"{case_id}:{event_type.value}"
+                    if not session.get(AuditEventRow, event_id):
+                        session.add(
+                            AuditEventRow(
+                                event_id=event_id,
+                                case_id=case_id,
+                                timestamp=datetime.utcnow(),
+                                event_type=event_type.value,
+                                actor="human_reviewer"
+                                if event_type == AuditEventType.HUMAN_DECISION_RECEIVED
+                                else "workflow",
+                                data_payload=to_json(data),
+                            )
+                        )
             session.commit()
 
     def get_case(self, case_id: str) -> dict | None:
@@ -426,23 +581,21 @@ def seed_database(database: Database, invoice_dir: str | Path = "data/demo/invoi
         ),
     ]
     with database.session_factory() as session:
-        for model in (
-            AuditEventRow,
-            CaseRow,
-            InvoiceHistoryRow,
-            GoodsReceiptRow,
-            PurchaseOrderRow,
-            SupplierRow,
-        ):
-            session.execute(delete(model))
-        session.add_all([SupplierRow(**item.model_dump()) for item in suppliers])
-        session.add_all(
+
+        def add_missing(rows):
+            for row in rows:
+                key = getattr(row, row.__mapper__.primary_key[0].key)
+                if session.get(type(row), key) is None:
+                    session.add(row)
+
+        add_missing([SupplierRow(**item.model_dump()) for item in suppliers])
+        add_missing(
             [
                 PurchaseOrderRow(po_number=item.po_number, payload=item.model_dump_json())
                 for item in pos
             ]
         )
-        session.add_all(
+        add_missing(
             [
                 GoodsReceiptRow(
                     receipt_id=item.receipt_id,
@@ -452,7 +605,7 @@ def seed_database(database: Database, invoice_dir: str | Path = "data/demo/invoi
                 for item in receipts
             ]
         )
-        session.add_all(
+        add_missing(
             [
                 InvoiceHistoryRow(
                     row_id=f"{item.supplier_id}:{item.invoice_id}",
