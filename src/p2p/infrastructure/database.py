@@ -221,10 +221,12 @@ BUSY_TIMEOUT_MS = 5000
 class Database:
     def __init__(self, url: str = "sqlite:///data/demo/p2p.db"):
         path = url.removeprefix("sqlite:///") if url.startswith("sqlite:///") else ""
-        if not path or path == ":memory:":
+        if not path or path == ":memory:" or "?" in path:
             # Commands are serialized with a lock file next to the database, and the
-            # checkpointer opens the same file; both need a real SQLite file.
-            raise ValueError("P2P_DATABASE_URL must be a sqlite:/// file path")
+            # checkpointer opens the same file by path; both need one plain file path.
+            # Query options would be read by SQLAlchemy but become part of the
+            # checkpointer's file name, splitting cases and checkpoints across two files.
+            raise ValueError("P2P_DATABASE_URL must be a sqlite:/// file path without options")
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.url = url
         self.engine = create_engine(url)
@@ -430,6 +432,11 @@ class SqliteRepository:
             session.commit()
             return review
 
+    @staticmethod
+    def _has_bound_review(session, case_id: str) -> bool:
+        command = session.get(CaseCommandRow, case_id)
+        return bool(command and command.review_payload)
+
     def submitted_review(self, case_id: str) -> dict | None:
         with self.database.session_factory() as session:
             row = session.get(CaseCommandRow, case_id)
@@ -527,10 +534,12 @@ class SqliteRepository:
                 for key, value in facts.items():
                     if getattr(row, key) != value:
                         setattr(row, key, value)
-                # A saved review or outcome means the case is healthy again. A case still
-                # PROCESSING has not moved past its failure, so its error stays until a run
-                # gets it further.
-                if row.last_error is not None and status != "PROCESSING":
+                # The error stays until the case gets past it: a new status, or a pending
+                # case that is simply waiting (no bound review whose run failed).
+                if row.last_error is not None and (
+                    status_changed
+                    or (status == "PENDING_REVIEW" and not self._has_bound_review(session, case_id))
+                ):
                     row.last_error = None
             if status == "PENDING_REVIEW" and row.review_requested_at is None:
                 row.review_requested_at = _utcnow()

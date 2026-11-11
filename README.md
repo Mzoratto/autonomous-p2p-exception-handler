@@ -142,7 +142,7 @@ Optional live-mode settings:
 
 Requests are sent with `store=False`. Each AI audit event records the model, response id, token counts and latency of the call.
 
-When the model service cannot be reached (timeout, connection error, rate limit, server error), the workflow stops asking the model, records the failure and sends the case to a reviewer. A rejected API key is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen.
+When the model service cannot be reached (timeout, connection error, rate limit, server error), the workflow stops asking the model, records the failure and sends the case to a reviewer. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
 
 Never commit a real API key. `.env.local` is ignored by Git.
 

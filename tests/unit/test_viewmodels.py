@@ -49,6 +49,12 @@ def test_processing_case_needs_recovery():
     )
 
 
+def test_a_case_being_retried_shows_processing_not_recovery():
+    case = {"status": "PROCESSING", "state": {}, "last_error": "OSError: disk full", "busy": True}
+
+    assert display_status(case) == StatusView("processing", "Processing")
+
+
 def test_completed_case_without_outcome_needs_recovery():
     assert display_status({"status": "COMPLETED", "state": {}}).key == "recovery"
 

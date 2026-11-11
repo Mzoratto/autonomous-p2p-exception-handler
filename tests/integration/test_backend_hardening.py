@@ -97,7 +97,17 @@ def test_sqlite_runs_in_wal_mode_with_a_busy_timeout(tmp_path):
         runtime.close()
 
 
-@pytest.mark.parametrize("url", ["postgresql://localhost/p2p", "sqlite://", "sqlite:///:memory:"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://localhost/p2p",
+        "sqlite://",
+        "sqlite:///:memory:",
+        # SQLAlchemy reads ?timeout as an option, but the checkpointer would open
+        # "p2p.db?timeout=10" as a second file.
+        "sqlite:///p2p.db?timeout=10",
+    ],
+)
 def test_only_sqlite_file_urls_are_accepted(url):
     with pytest.raises(ValueError, match="sqlite:/// file path"):
         Database(url)
@@ -191,3 +201,26 @@ def test_commands_log_their_start_outcome_and_duration(app, caplog):
     messages = [record.getMessage() for record in caplog.records if record.name == "p2p.service"]
     assert messages[0] == f"Processing started for {case_id}"
     assert messages[1].startswith(f"Processing finished for {case_id}: COMPLETED in ")
+
+
+def test_a_failed_review_run_keeps_its_error_until_the_review_is_applied(app, monkeypatch):
+    case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
+    review = HumanReview(reviewer="Ana Reviewer", action=DecisionType.REJECT, comment="dup")
+    invoke = app.runtime.graph.invoke
+
+    def resume_fails(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(app.runtime.graph, "invoke", resume_fails)
+    with pytest.raises(OSError):
+        app.review_case(case_id, review)
+    monkeypatch.setattr(app.runtime.graph, "invoke", invoke)
+
+    app.refresh_open_cases()
+    case = app.get_case(case_id)
+    assert (case["status"], case["last_error"]) == ("PENDING_REVIEW", "OSError: disk full")
+    assert display_status(case).label == "Needs recovery"
+
+    app.review_case(case_id, review, checkpoint_id=case["checkpoint_id"])
+
+    assert app.get_case(case_id)["last_error"] is None

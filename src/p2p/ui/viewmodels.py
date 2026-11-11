@@ -101,10 +101,11 @@ class StatusView:
 def display_status(case: dict) -> StatusView:
     """Accepts a get_case() view or a query_cases() row."""
     status = case.get("status")
+    if case.get("busy"):
+        # A run holds the case right now (possibly a retry); recovery would offer a second run.
+        return StatusView("processing", "Processing")
     if case.get("last_error") and status != "COMPLETED":
         return StatusView("recovery", "Needs recovery")
-    if case.get("busy"):
-        return StatusView("processing", "Processing")
     if status == "PENDING_REVIEW":
         return StatusView("review", "Awaiting review")
     if status == "COMPLETED":

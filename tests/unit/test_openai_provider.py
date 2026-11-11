@@ -99,13 +99,19 @@ def test_outages_become_model_unavailable(provider, error):
         provider.structured_response(Resolution, MESSAGES)
 
 
-def test_rejected_key_is_an_authentication_error_not_an_outage(provider):
-    with_outcome(
-        provider,
+@pytest.mark.parametrize(
+    "error",
+    [
         openai.AuthenticationError(
             "bad key", response=httpx.Response(401, request=REQUEST), body=None
         ),
-    )
+        openai.PermissionDeniedError(
+            "no access to model", response=httpx.Response(403, request=REQUEST), body=None
+        ),
+    ],
+)
+def test_rejected_credentials_are_a_configuration_fault_not_an_outage(provider, error):
+    with_outcome(provider, error)
 
     with pytest.raises(ModelAuthenticationError):
         provider.structured_response(Resolution, MESSAGES)

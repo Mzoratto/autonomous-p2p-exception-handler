@@ -103,7 +103,10 @@ def setup_screen(title: str) -> None:
         "2. Set `DEMO_MODE=true` to run on the built-in mock model."
     )
     if st.session_state.get(SETUP_ERROR_KEY) == "auth":
-        st.caption("The model service rejected the key while a case was being processed.")
+        st.caption(
+            "While a case was being processed, the model service rejected the key or "
+            "denied it access to the configured model."
+        )
         if st.button("Try again", type="primary", key="setup_try_again"):
             st.session_state.pop(SETUP_ERROR_KEY, None)
             st.rerun()

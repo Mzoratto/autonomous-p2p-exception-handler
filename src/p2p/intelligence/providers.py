@@ -195,8 +195,9 @@ class OpenAIModelProvider:
                 text_format=schema,
                 store=False,
             )
-        except openai.AuthenticationError as exc:
-            # A rejected key is a configuration fault; routing cases to review would hide it.
+        except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
+            # A rejected key, or one without access to the model, is a configuration fault;
+            # routing cases to review would hide it.
             raise ModelAuthenticationError(str(exc)) from exc
         except (
             openai.APIConnectionError,
