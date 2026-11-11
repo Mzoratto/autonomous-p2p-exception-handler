@@ -1,14 +1,19 @@
 import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy.exc import OperationalError
+from streamlit.testing.v1 import AppTest
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import DecisionType, HumanReview, Invoice
 from p2p.infrastructure.database import CaseRow, Database, demo_invoices
 from p2p.ui.viewmodels import display_status
+
+REPO = Path(__file__).parents[2]
 
 LEGACY_DDL = """
 CREATE TABLE cases (
@@ -50,6 +55,28 @@ def table_snapshot(path) -> tuple:
     return rows, sorted(indexes)
 
 
+def legacy_copy(source, legacy, case_ids, corrupt=()) -> list[tuple]:
+    """Copy cases and their audit events into a database with the pre-projection schema."""
+    with sqlite3.connect(source) as connection:
+        cases = [
+            connection.execute(
+                "SELECT case_id, invoice_id, status, invoice_payload, state_payload, updated_at "
+                "FROM cases WHERE case_id = ?",
+                (case_id,),
+            ).fetchone()
+            for case_id in case_ids
+        ]
+        events = connection.execute(
+            "SELECT event_id, case_id, timestamp, event_type, actor, data_payload FROM audit_events"
+        ).fetchall()
+    cases = [(*case[:4], "{not json", case[5]) if case[0] in corrupt else case for case in cases]
+    with sqlite3.connect(legacy) as connection:
+        connection.executescript(LEGACY_DDL)
+        connection.executemany("INSERT INTO cases VALUES (?, ?, ?, ?, ?, ?)", cases)
+        connection.executemany("INSERT INTO audit_events VALUES (?, ?, ?, ?, ?, ?)", events)
+    return events
+
+
 def test_migration_adds_columns_and_backfills_a_legacy_case(tmp_path):
     source = tmp_path / "source.db"
     runtime = create_runtime(
@@ -57,22 +84,8 @@ def test_migration_adds_columns_and_backfills_a_legacy_case(tmp_path):
     )
     case_id = CaseService(runtime).process_invoice(demo_invoices()["01_exact_match"])["case_id"]
     runtime.close()
-    with sqlite3.connect(source) as connection:
-        case = connection.execute(
-            "SELECT case_id, invoice_id, status, invoice_payload, state_payload, updated_at "
-            "FROM cases WHERE case_id = ?",
-            (case_id,),
-        ).fetchone()
-        events = connection.execute(
-            "SELECT event_id, case_id, timestamp, event_type, actor, data_payload "
-            "FROM audit_events WHERE case_id = ?",
-            (case_id,),
-        ).fetchall()
     legacy = tmp_path / "legacy.db"
-    with sqlite3.connect(legacy) as connection:
-        connection.executescript(LEGACY_DDL)
-        connection.execute("INSERT INTO cases VALUES (?, ?, ?, ?, ?, ?)", case)
-        connection.executemany("INSERT INTO audit_events VALUES (?, ?, ?, ?, ?, ?)", events)
+    events = legacy_copy(source, legacy, [case_id])
 
     database = Database(f"sqlite:///{legacy}")
     database.create_all()
@@ -94,6 +107,141 @@ def test_migration_adds_columns_and_backfills_a_legacy_case(tmp_path):
     database.create_all()
 
     assert table_snapshot(legacy) == before
+
+
+def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatch):
+    source = tmp_path / "source.db"
+    runtime = create_runtime(
+        database_url=f"sqlite:///{source}", demo_mode=True, checkpointer=InMemorySaver()
+    )
+    cases = process(
+        CaseService(runtime),
+        "01_exact_match",
+        "02_small_price_variance",
+        "03_large_price_variance",
+        "04_quantity_variance",
+        "05_quantity_exceeds_receipt",
+    )
+    valid, oversized, broken, non_scalar, undecodable = cases.values()
+    runtime.close()
+    legacy = tmp_path / "legacy.db"
+    legacy_copy(source, legacy, list(cases.values()), corrupt={broken})
+    with sqlite3.connect(legacy) as connection:
+        # Valid JSON whose total in cents exceeds SQLite's signed 64-bit INTEGER.
+        connection.execute(
+            "UPDATE cases SET invoice_payload = json_set(invoice_payload, '$.total', "
+            "'92233720368547758.08') WHERE case_id = ?",
+            (oversized,),
+        )
+        # Valid JSON whose supplier name is a list, which SQLite cannot bind.
+        connection.execute(
+            "UPDATE cases SET invoice_payload = json_set(invoice_payload, '$.supplier_name', "
+            "json('[]')) WHERE case_id = ?",
+            (non_scalar,),
+        )
+        # TEXT that is not valid UTF-8: the driver cannot even load the row.
+        connection.execute(
+            "UPDATE cases SET state_payload = CAST(X'7BFF' AS TEXT) WHERE case_id = ?",
+            (undecodable,),
+        )
+
+    database = Database(f"sqlite:///{legacy}")
+    database.create_all()
+
+    with database.session_factory() as session:
+        row = session.get(CaseRow, broken)
+        assert row.last_error == "Migration could not read stored state: JSONDecodeError"
+        assert row.created_at == row.updated_at
+        assert (row.supplier_name, row.total_cents, row.primary_exception) == (None, None, None)
+        row = session.get(CaseRow, oversized)
+        assert row.last_error == "Migration could not read stored state: ValueError"
+        assert (row.supplier_name, row.total_cents) == (None, None)
+        row = session.get(CaseRow, non_scalar)
+        assert row.last_error == "Migration could not read stored state: ProgrammingError"
+        assert (row.supplier_name, row.total_cents, row.created_at) == (None, None, row.updated_at)
+        assert session.get(CaseRow, valid).supplier_name == "Acme Components"
+    database.engine.dispose()
+    with sqlite3.connect(legacy) as connection:
+        assert connection.execute(
+            "SELECT created_at = updated_at, last_error, supplier_name FROM cases "
+            "WHERE case_id = ?",
+            (undecodable,),
+        ).fetchone() == (1, "Migration could not read stored state: OperationalError", None)
+
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{legacy}")
+    monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
+    at.switch_page("src/p2p/ui/pages/cases.py").run()
+
+    assert not at.exception
+    table = at.dataframe[0].value
+    status = dict(zip(table["Case"], table["Status"], strict=True))
+    assert status == {
+        valid: "Approved · Autonomous",
+        oversized: "Needs recovery",
+        broken: "Needs recovery",
+        non_scalar: "Needs recovery",
+        undecodable: "Needs recovery",
+    }
+
+
+def test_startup_and_processing_survive_an_undecodable_case(tmp_path):
+    url = f"sqlite:///{tmp_path / 'p2p.db'}"
+    runtime = create_runtime(database_url=url, demo_mode=True)
+    broken = process(CaseService(runtime), "03_large_price_variance")["03_large_price_variance"]
+    runtime.close()
+    with sqlite3.connect(tmp_path / "p2p.db") as connection:
+        connection.execute(
+            "UPDATE cases SET state_payload = CAST(X'7BFF' AS TEXT) WHERE case_id = ?", (broken,)
+        )
+
+    runtime = create_runtime(database_url=url, demo_mode=True)
+    try:
+        app = CaseService(runtime)
+        app.refresh_open_cases()
+        result = app.process_invoice(demo_invoices()["01_exact_match"])
+
+        assert result["status"] == "COMPLETED"
+        rows = {row["case_id"]: row for row in app.query_cases(limit=None)[0]}
+        assert rows[broken]["last_error"].startswith("ValueError: Stored case could not be read")
+        assert display_status(rows[broken]).label == "Needs recovery"
+        with pytest.raises(ValueError, match="Stored case could not be read"):
+            app.get_case(broken)
+    finally:
+        runtime.close()
+
+
+def test_migration_leaves_a_row_unmarked_when_the_database_is_busy(tmp_path, monkeypatch):
+    source = tmp_path / "source.db"
+    runtime = create_runtime(
+        database_url=f"sqlite:///{source}", demo_mode=True, checkpointer=InMemorySaver()
+    )
+    case_id = CaseService(runtime).process_invoice(demo_invoices()["01_exact_match"])["case_id"]
+    runtime.close()
+    legacy = tmp_path / "legacy.db"
+    legacy_copy(source, legacy, [case_id])
+
+    def locked(session, row):
+        busy = sqlite3.OperationalError("database is locked")
+        busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        raise OperationalError("UPDATE cases", {}, busy)
+
+    monkeypatch.setattr(Database, "_backfill", staticmethod(locked))
+    with pytest.raises(OperationalError):
+        Database(f"sqlite:///{legacy}").create_all()
+    monkeypatch.undo()
+
+    with sqlite3.connect(legacy) as connection:
+        assert connection.execute("SELECT created_at, last_error FROM cases").fetchone() == (
+            None,
+            None,
+        )
+    database = Database(f"sqlite:///{legacy}")
+    database.create_all()
+    with database.session_factory() as session:
+        row = session.get(CaseRow, case_id)
+        assert (row.supplier_name, row.last_error) == ("Acme Components", None)
 
 
 @pytest.fixture

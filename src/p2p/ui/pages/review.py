@@ -15,6 +15,7 @@ from p2p.ui.viewmodels import (
     format_money,
     label_action,
     label_exception,
+    local_zone,
     parse_timestamp,
     severity_chip,
 )
@@ -131,21 +132,18 @@ def confirm_dialog(case: dict, app) -> None:
                 clear_confirmation()
                 st.rerun()
             if st.button(f"Confirm {label.lower()}", key="review_confirm_button", type="primary"):
-                apply_review(case, app, action, request)
+                clear_confirmation()
+                review = HumanReview(
+                    reviewer=current_reviewer(), action=action, comment=request["note"] or None
+                )
+                apply_review(case, app, review, request["checkpoint_id"])
 
     st.dialog(f"{label} {case['invoice_id']}?", on_dismiss=clear_confirmation)(body)()
 
 
-def apply_review(case: dict, app, action: DecisionType, request: dict) -> None:
-    clear_confirmation()
+def apply_review(case: dict, app, review: HumanReview, checkpoint_id: str | None) -> None:
     try:
-        app.review_case(
-            request["case_id"],
-            HumanReview(
-                reviewer=current_reviewer(), action=action, comment=request["note"] or None
-            ),
-            checkpoint_id=request["checkpoint_id"],
-        )
+        app.review_case(case["case_id"], review, checkpoint_id=checkpoint_id)
     except Exception:
         st.session_state["flash"] = {
             "kind": "error",
@@ -156,7 +154,7 @@ def apply_review(case: dict, app, action: DecisionType, request: dict) -> None:
     st.session_state["flash"] = {
         "kind": "toast",
         "text": (
-            f"{label_action(action)} recorded for {case['invoice_id']} · "
+            f"{label_action(review.action.value)} recorded for {case['invoice_id']} · "
             f"{len(remaining)} left in queue"
         ),
     }
@@ -167,21 +165,49 @@ def apply_review(case: dict, app, action: DecisionType, request: dict) -> None:
     st.rerun()
 
 
+def recovery_panel(case: dict, app, submitted: dict) -> None:
+    """The review was confirmed and bound before the workflow stopped; finish it unchanged."""
+    stored = HumanReview.model_validate(submitted)
+    tz, suffix = local_zone(st.context.timezone)
+    # Stored times are UTC; a naive value must not be read as the server's local time.
+    submitted_at = stored.reviewed_at
+    if submitted_at.tzinfo is None:
+        submitted_at = submitted_at.replace(tzinfo=UTC)
+    rows = "".join(
+        f'<div class="p2p-kv"><code>{h(key)}</code><span>{h(value)}</span></div>'
+        for key, value in (
+            ("Reviewer", stored.reviewer),
+            ("Note", stored.comment or "No note added."),
+            ("Submitted", submitted_at.astimezone(tz).strftime("%d %b %Y %H:%M") + suffix),
+        )
+    )
+    render_html(
+        f"""
+        <section class="p2p-recovery-card">
+          <span class="p2p-caption">Submitted decision</span>
+          {action_pill(stored.action.value)}
+          {rows}
+          <span class="p2p-caption">This decision was confirmed and stored, but the workflow stopped before applying it. Finishing applies it exactly as submitted.</span>
+        </section>
+        """
+    )
+    if st.button(
+        "Finish recovery", type="primary", width="stretch", key=f"review_recover_{case['case_id']}"
+    ):
+        review = HumanReview(reviewer=stored.reviewer, action=stored.action, comment=stored.comment)
+        apply_review(case, app, review, case.get("checkpoint_id"))
+
+
 def decision_panel(case: dict, app) -> None:
     case_id = case["case_id"]
     decision_key, note_key = f"review_decision_{case_id}", f"review_note_{case_id}"
-    submitted = case.get("submitted_review")
-    if submitted:
-        st.session_state.setdefault(decision_key, DecisionType(submitted["action"]))
-        st.session_state.setdefault(note_key, submitted.get("comment") or "")
-
     render_html('<h3 class="p2p-panel-title">Your decision</h3>')
     render_html(recommendation_html(case, app.runtime.rules.confidence.auto_resolve))
+    submitted = case.get("submitted_review")
     if submitted:
-        st.info(
-            "A review is already durably submitted. Submit the same decision and note to "
-            "finish recovery."
-        )
+        recovery_panel(case, app, submitted)
+        return
+
     ai_action = (case["state"].get("resolution") or {}).get("action")
     decision = st.radio(
         "Decision",

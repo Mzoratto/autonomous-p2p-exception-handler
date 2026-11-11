@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -21,11 +22,14 @@ from sqlalchemy import (
     create_engine,
     func,
     inspect,
+    literal,
     or_,
     select,
     text,
+    update,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import DeclarativeBase, Mapped, defer, mapped_column, sessionmaker
 
 from p2p.domain.casefacts import project
 from p2p.domain.models import (
@@ -45,6 +49,15 @@ from p2p.domain.models import (
 def _utcnow() -> datetime:
     """Storage keeps naive UTC; every value leaving the repository is tz-aware."""
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def is_transient(exc: BaseException) -> bool:
+    """A busy or locked database: retrying later can succeed, so no row is at fault."""
+    if not isinstance(exc, OperationalError):
+        return False
+    code = getattr(exc.orig, "sqlite_errorcode", None)
+    # Extended result codes keep the primary code in the low byte.
+    return code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
 
 
 class Base(DeclarativeBase):
@@ -212,7 +225,9 @@ class Database:
         """Add the projected case columns to older databases and backfill them once.
 
         Idempotent: columns and indexes are only added when missing, and only rows without
-        `created_at` are backfilled.
+        `created_at` are backfilled. A row whose stored payloads cannot be read keeps empty
+        projected columns and gets `last_error`; its `created_at` is still set, so it is not
+        retried on every start.
         """
         existing = {column["name"] for column in inspect(self.engine).get_columns("cases")}
         with self.engine.begin() as connection:
@@ -225,26 +240,49 @@ class Database:
                     text(f"CREATE INDEX IF NOT EXISTS ix_cases_{name} ON cases ({name})")
                 )
         with self.session_factory() as session:
-            rows = session.scalars(select(CaseRow).where(CaseRow.created_at.is_(None))).all()
-            for row in rows:
-                state = json.loads(row.state_payload)
-                for key, value in project(json.loads(row.invoice_payload), state).items():
-                    setattr(row, key, value)
-                first_event = session.scalar(
-                    select(func.min(AuditEventRow.timestamp)).where(
-                        AuditEventRow.case_id == row.case_id
+            case_ids = session.scalars(
+                select(CaseRow.case_id).where(CaseRow.created_at.is_(None))
+            ).all()
+            for case_id in case_ids:
+                # One commit per row: a value SQLite rejects rolls back only that row.
+                try:
+                    self._backfill(session, session.get(CaseRow, case_id))
+                    session.commit()
+                except Exception as exc:
+                    session.rollback()
+                    if is_transient(exc):
+                        # Nothing is wrong with the row; leave it for the next start.
+                        raise
+                    # Mark without loading the row again: its payloads may not even decode.
+                    session.execute(
+                        update(CaseRow.__table__)
+                        .where(CaseRow.__table__.c.case_id == case_id)
+                        .values(
+                            created_at=CaseRow.__table__.c.updated_at,
+                            last_error="Migration could not read stored state: "
+                            f"{type(exc).__name__}",
+                        )
                     )
-                )
-                row.created_at = first_event or row.updated_at
-                row.review_requested_at = session.scalar(
-                    select(func.max(AuditEventRow.timestamp)).where(
-                        AuditEventRow.case_id == row.case_id,
-                        AuditEventRow.event_type == AuditEventType.HUMAN_REVIEW_REQUESTED.value,
-                    )
-                )
-                completed = (state.get("outcome") or {}).get("completed_at")
-                row.completed_at = _naive_utc(completed) if completed else None
-            session.commit()
+                    session.commit()
+
+    @staticmethod
+    def _backfill(session, row: CaseRow) -> None:
+        state = json.loads(row.state_payload)
+        for key, value in project(json.loads(row.invoice_payload), state).items():
+            setattr(row, key, value)
+        first_event = session.scalar(
+            select(func.min(AuditEventRow.timestamp)).where(AuditEventRow.case_id == row.case_id)
+        )
+        row.created_at = first_event or row.updated_at
+        row.review_requested_at = session.scalar(
+            select(func.max(AuditEventRow.timestamp)).where(
+                AuditEventRow.case_id == row.case_id,
+                AuditEventRow.event_type == AuditEventType.HUMAN_REVIEW_REQUESTED.value,
+            )
+        )
+        completed = (state.get("outcome") or {}).get("completed_at")
+        row.completed_at = _naive_utc(completed) if completed else None
+        session.flush()
 
 
 class SqliteRepository:
@@ -267,7 +305,7 @@ class SqliteRepository:
     def has_data(self) -> bool:
         with self.database.session_factory() as session:
             return any(
-                session.scalar(select(model).limit(1)) is not None
+                session.scalar(select(literal(1)).select_from(model).limit(1)) is not None
                 for model in (
                     CaseRow,
                     CaseCommandRow,
@@ -289,18 +327,20 @@ class SqliteRepository:
             if command and command.invoice_payload != payload:
                 raise ValueError("Case ID is permanently bound to different invoice content")
             # Include pre-migration cases; never silently combine legacy duplicates.
-            for row in session.scalars(select(CaseRow)).all():
-                existing = Invoice.model_validate_json(row.invoice_payload)
+            # Only the invoice is read, so an unreadable case state cannot block a new claim.
+            rows = session.execute(select(CaseRow.case_id, CaseRow.invoice_payload)).all()
+            for row_case_id, invoice_payload in rows:
+                existing = Invoice.model_validate_json(invoice_payload)
                 same_identity = (
                     existing.supplier_id.strip().upper(),
                     existing.invoice_id.strip().upper(),
                 ) == (invoice.supplier_id, invoice.invoice_id)
-                if row.case_id == case_id or same_identity:
+                if row_case_id == case_id or same_identity:
                     if to_json(existing) != payload:
                         raise ValueError(
                             "Invoice or case identity already exists with different content"
                         )
-                    return row.case_id, False
+                    return row_case_id, False
             session.add(CaseCommandRow(case_id=case_id, identity=identity, invoice_payload=payload))
             session.add(
                 CaseRow(
@@ -350,14 +390,20 @@ class SqliteRepository:
     def reserved_quantities(
         self, po_number: str | None, exclude_case_id: str
     ) -> dict[str, Decimal]:
+        # Reads the invoice and the projected outcome only, never the case state.
+        with self.database.session_factory() as session:
+            rows = session.execute(
+                select(CaseRow.invoice_payload, CaseRow.outcome_action).where(
+                    CaseRow.case_id != exclude_case_id
+                )
+            ).all()
         quantities: dict[str, Decimal] = {}
-        for case in self.list_cases():
-            if case["case_id"] == exclude_case_id or case["invoice"].get("po_number") != po_number:
-                continue
-            if case["state"].get("outcome", {}).get("action") == "REJECT":
+        for invoice_payload, outcome_action in rows:
+            invoice = json.loads(invoice_payload)
+            if invoice.get("po_number") != po_number or outcome_action == "REJECT":
                 continue
             # Pending, interrupted, failed, and REQUEST_INFO cases retain reservations.
-            for line in case["invoice"]["line_items"]:
+            for line in invoice["line_items"]:
                 quantities[line["line_id"]] = quantities.get(
                     line["line_id"], Decimal("0")
                 ) + Decimal(line["quantity"])
@@ -462,7 +508,13 @@ class SqliteRepository:
 
     def get_case(self, case_id: str) -> dict | None:
         with self.database.session_factory() as session:
-            row = session.get(CaseRow, case_id)
+            try:
+                row = session.get(CaseRow, case_id)
+            except OperationalError as exc:
+                if is_transient(exc):
+                    raise
+                # Undecodable stored text: report it like any other unreadable case.
+                raise ValueError(f"Stored case could not be read: {exc.orig}") from exc
             return self._case_dict(row) if row else None
 
     def list_cases(self, status: str | None = None) -> list[dict]:
@@ -492,7 +544,15 @@ class SqliteRepository:
             raise ValueError(f"Unknown case view: {view}")
         if sort not in CASE_SORTS:
             raise ValueError(f"Unknown case sort: {sort}")
-        statement = select(CaseRow).where(*CASE_VIEWS[view])
+        # Payloads are never needed here; loading them would also fail on an undecodable row.
+        statement = (
+            select(CaseRow)
+            .options(
+                defer(CaseRow.invoice_payload, raiseload=True),
+                defer(CaseRow.state_payload, raiseload=True),
+            )
+            .where(*CASE_VIEWS[view])
+        )
         term = search.strip().lower()
         if term:
             escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -534,12 +594,18 @@ class SqliteRepository:
             }
 
     def record_error(self, case_id: str, message: str) -> None:
-        """Store the last failure for a case without touching its status."""
+        """Store the last failure for a case without touching its status or reading payloads."""
         message = message[:MAX_ERROR_LENGTH]
         with self.database.session_factory() as session:
-            row = session.get(CaseRow, case_id)
-            if row is not None and row.last_error != message:
-                row.last_error = message
+            current = session.execute(
+                select(CaseRow.last_error).where(CaseRow.case_id == case_id)
+            ).first()
+            if current is not None and current.last_error != message:
+                session.execute(
+                    update(CaseRow.__table__)
+                    .where(CaseRow.__table__.c.case_id == case_id)
+                    .values(last_error=message)
+                )
                 session.commit()
 
     @staticmethod
