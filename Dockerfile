@@ -13,6 +13,7 @@ COPY src ./src
 RUN pip install --no-cache-dir uv==0.11.29 && uv sync --frozen --no-dev
 COPY config ./config
 COPY .streamlit ./.streamlit
+COPY static ./static
 COPY app.py ./app.py
 RUN python -m p2p.infrastructure.database
 

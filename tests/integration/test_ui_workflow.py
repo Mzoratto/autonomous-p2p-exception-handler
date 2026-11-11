@@ -52,6 +52,7 @@ def test_process_banner_refreshes_after_human_review(tmp_path, monkeypatch):
     widget_with_label(app.radio, "Action").set_value(DecisionType.REQUEST_INFO).run()
     widget_with_label(app.button, "Submit and resume workflow").click().run()
     assert not app.exception
+    assert app.toast[0].value == "Request info recorded for INV-LARGE · 0 left in queue"
     widget_with_label(app.radio, "Mobile navigation").set_value("Process Invoice").run()
     widget_with_label(app.radio, "Workflow stage").set_value("Resolve").run()
     assert not app.exception
