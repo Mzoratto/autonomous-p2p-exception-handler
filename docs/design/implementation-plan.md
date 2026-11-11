@@ -10,7 +10,7 @@ Repo: `/Users/marco/Autonomous P2P Exception Handler` (clone of `main` @ `4d4abf
 
 | # | v2 says | What the code shows | v3 decision |
 |---|---|---|---|
-| R1 | D2: bump Streamlit; "check AppTest supports…" | `uv.lock` pins 1.63.0 (latest is 1.67.0). 1.63.0 already has `st.navigation(position=)`, `st.Page(url_path=)`, `st.dialog(on_dismiss=)`, `st.pills`, `st.segmented_control`, `st.tabs(default=, key=)`, `st.radio(captions=, index=None)`, `st.dataframe(on_select=)`, `st.container(horizontal=, wrap=, width=)`, `st.context.url/.timezone`, theme keys `borderColor`, `linkColor`, `baseRadius`, `fontFaces`, `[theme.sidebar]`, `client.toolbarMode`, `server.enableStaticServing` | No version bump. D2 is closed |
+| R1 | D2: bump Streamlit; "check AppTest supports…" | `uv.lock` pinned 1.63.0, which caps `pillow<13`; `make audit` reported 40 pillow advisories fixed only in pillow 13.0.0, and pillow 13 needs Streamlit ≥ 1.66.1. The APIs the plan needs (`st.navigation(position=)`, `st.Page(url_path=)`, `st.dialog(on_dismiss=)`, `st.pills`, `st.segmented_control`, `st.tabs(default=, key=)`, `st.radio(captions=, index=None)`, `st.dataframe(on_select=)`, `st.container(horizontal=, wrap=, width=)`, `st.context.url/.timezone`, `st.logo`, theme keys `borderColor`, `linkColor`, `baseRadius`, `fontFaces`, `[theme.sidebar]`, `client.toolbarMode`, `server.enableStaticServing`) exist in both versions | Streamlit upgraded to 1.67.0 to clear the 40 pillow advisories ([#3](https://github.com/Mzoratto/autonomous-p2p-exception-handler/pull/3)). Probes re-run on 1.67.0: all pass; the only new finding is that `st.context.url`/`.timezone` are `None` in `AppTest` and `st.context.url` is the origin only in a browser. D2 is closed |
 | R2 | Phase 3: "AI not invoked" for duplicates | False today: `route_after_match` sends every unmatched result to the Investigator. Scenario 08 records 10 events including INVESTIGATION/RESOLUTION/CRITIQUE before policy rejects | User decision: duplicates skip AI (routing change in Phase 3) |
 | R3 | Phase 3: 9 policy checks | `DecisionPolicy.evaluate` has triggers with no row among the 9: `allowed_action` (ESCALATE proposed; fires in scenarios 06 and 09), `model_error`, `reflection.max_iterations`, and discrepancy types CURRENCY_MISMATCH, UNMATCHED_LINE, ARITHMETIC_INCONSISTENCY | 11 checks: the design's 9 in design order, plus `document_consistency` and `ai_recommendation`, with an invariant test tying checks to `triggered_rules` |
 | R4 | Phase 4: "unify result shapes… one JSON-safe CaseView" | `tests/integration/test_audit_controls.py` (must pass unchanged) reads Pydantic objects from command results, e.g. `result["state"]["policy_result"].triggered_rules` | Command return shape stays. `process_invoice` adds one key, `is_replay`. The UI reads only `get_case()` views |
@@ -29,7 +29,7 @@ Repo: `/Users/marco/Autonomous P2P Exception Handler` (clone of `main` @ `4d4abf
 | R17 | (not covered) | `human_review_node` (nodes.py:297) and `finalize_node` (nodes.py:318) default the proposed action to APPROVE when there is no AI resolution, so a human Reject on scenario 10 is stored as `HUMAN_OVERRIDDEN` although no AI recommendation existed. Phase 6 outage routing adds more cases reviewed without a resolution. (Duplicates skip AI from Phase 3 but are rejected autonomously, so they never reach this comparison.) | Known limitation. `finalize_node` and `DecisionSource` are not changed. Phase 3 documents it in `docs/audit-remediation.md`; the UI and the metrics count an override only when an AI resolution exists |
 | R18 | Phase 5: `save_case` refreshes the new columns on every save | `refresh_open_cases()` reconciles every open case on every page run; unconditional column writes would make each page view write to the database | `save_case` assigns and commits only columns whose value differs; reconciling an unchanged case writes nothing (test in Phase 5) |
 | R19 | Phase 6: `AuthenticationError` treated as an outage | A wrong API key is a configuration fault, not an outage; routing it to review would park every invoice in the queue | It is not converted to `ModelUnavailableError`. It propagates out of the workflow and `main()` shows the setup screen titled "Live mode cannot authenticate" |
-| R20 | Phase 3: tab labels carry counts and the tabs have a `key` | Labels change after a review (timeline 12 → 14 events). A probe on 1.63.0 showed no exception in `AppTest` when labels change under a fixed key; the browser behaviour is not proven | Phase 3 adds an `AppTest` for it; if it raises or resets badly, drop the counts from the labels and list the deviation |
+| R20 | Phase 3: tab labels carry counts and the tabs have a `key` | Labels change after a review (timeline 12 → 14 events). Probes on 1.63.0 and 1.67.0 showed no exception in `AppTest` when labels change under a fixed key; the browser behaviour is not proven | Phase 3 adds an `AppTest` for it; if it raises or resets badly, drop the counts from the labels and list the deviation |
 | R21 | Phase 4: clear the decision and note widget keys after a confirmed review | Those keys are per case; assigning to a widget key after the widget rendered raises in Streamlit | Only `review_confirm` is removed. No code assigns to a widget key after its widget has rendered |
 | R22 | Screenshots committed under `docs/design/` on the phase branch | 18 reference images plus per-phase images would bloat `main` | Images live on an orphan branch `screenshots`; `main` gets only the html, `support.js`, `README.md` and `implementation-plan.md` |
 
@@ -58,17 +58,18 @@ Running all ten in order in one database: still 3 completed and 7 pending; 04 be
 - `RESOLUTION_PROPOSED` / `RESOLUTION_REVISED` data: `action, rationale, evidence_refs, confidence, information_request, error, attempt` (0-based) plus hashes. `CRITIQUE_PASSED` / `CRITIQUE_FAILED` data: `valid, issues, recommended_changes, confidence_adjustment, iteration, exhausted`. The post-Critic confidence of a rejected attempt (0.75 in scenario 03) is not recorded anywhere.
 - `HUMAN_DECISION_RECEIVED` and `CASE_COMPLETED` are written by `save_case` with the full `HumanReview` / `CaseOutcome` as data.
 
-### Streamlit 1.63.0 test behaviour (probed with `AppTest`)
+### Streamlit 1.67.0 test behaviour (probed with `AppTest`)
 
 - File-based pages registered through `st.navigation` work; `at.switch_page("<path relative to repo-root app.py>")`, `at.query_params[...] = v`, `st.switch_page(page, query_params=...)`, `at.pills[i].set_value()`, `at.toast` after a flash-and-rerun all work.
 - A state-driven `@st.dialog` renders inline and its buttons are clickable.
 - `st.switch_page` must be called from the script body (`if st.button(...): st.switch_page(...)`), not from a callback. Setting `st.query_params` in a callback is fine.
+- `st.context.url` and `st.context.timezone` are `None` under `AppTest`, so UI tests exercise the fallbacks (relative link, UTC). In a browser `st.context.url` is the origin only (for example `http://127.0.0.1:8503`, no path or query) and `st.context.timezone` is the browser's IANA zone.
 
 ## Execution protocol
 
 1. One run builds one phase. The next phase is the first one in the table below whose branch has no merged PR: `gh pr list --state merged --json headRefName --jq '.[].headRefName'`. If that phase's PR is open and unmerged, stop and report it.
-2. Start: `git switch main && git pull --ff-only && git switch -c <branch>`; `make setup && make lint && make test` must be green before editing.
-3. Finish: `make lint && make test` green, `git status` reviewed, push, `gh pr create --base main`. PR body sections: Summary, Screens (design vs build at 1440 / 900 / 390 px), Deviations from the design, Tests (command and counts), Unverified. Stop after the PR is open and report its URL.
+2. Start: `git switch main && git pull --ff-only && git switch -c <branch>`; `make setup && make lint && make test && make audit` must be green before editing.
+3. Finish: `make lint && make test && make audit` green, `git status` reviewed, push, `gh pr create --base main`. PR body sections: Summary, Screens (design vs build at 1440 / 900 / 390 px), Deviations from the design, Tests (command and counts), Unverified. After `gh pr create`, wait for the PR's check runs to complete via `gh api repos/Mzoratto/autonomous-p2p-exception-handler/commits/<head-sha>/check-runs`. A phase is done only when CI is green. If CI fails for a reason unrelated to the phase, report it and stop. Stop after CI is green and report the PR URL and the CI conclusion.
 4. Build screenshots: run the app on a scratch database and a free port (8501 may be in use), `P2P_DATABASE_URL=sqlite:////tmp/p2p-verify/p2p.db .venv/bin/streamlit run app.py --server.port 8502 --server.headless true`; capture with the session browser tool at widths 1440, 900, 390 as webp. Images never go into `main` or a phase branch. They are committed to the orphan branch `screenshots` through a temporary worktree: `git fetch origin screenshots && git worktree add -B screenshots /tmp/p2p-screenshots origin/screenshots`, save to `/tmp/p2p-screenshots/docs/design/screenshots/phase-<n>/<screen>-<width>.webp`, `git -C /tmp/p2p-screenshots add docs && git -C /tmp/p2p-screenshots commit -m "Add phase <n> screenshots" && git -C /tmp/p2p-screenshots push origin screenshots`, then `git worktree remove /tmp/p2p-screenshots`. PR bodies link each image as `https://github.com/Mzoratto/autonomous-p2p-exception-handler/blob/screenshots/<path>?raw=true`, next to the matching `docs/design/reference/<screen>-<width>.webp` on the same branch.
 5. Rules for every phase: `tests/integration/test_audit_controls.py` is never edited; the UI shows domain results and never decides pass/fail, tolerance or threshold itself (formatting and display subtraction are allowed); do not open or edit `.env`, `.env.local` or `.env.example`.
 
@@ -307,7 +308,7 @@ Order: 1–4 (backend, each with its tests) → 5 → 6 → 7 → 8.
 
 ## Verification
 
-Every phase: `make lint` → `All checks passed!`; `make test` → all pass, count ≥ 83 plus the phase's new tests; `git status` shows only intended files.
+Every phase: `make lint`, `make test` and `make audit` pass; PR CI green. `make test` count ≥ 83 plus the phase's new tests; `git status` shows only intended files.
 
 | Phase | New-behaviour check (app on the scratch database, port 8502) |
 |---|---|
@@ -322,7 +323,7 @@ Every phase: `make lint` → `All checks passed!`; `make test` → all pass, cou
 
 ## Assumptions & contingencies
 
-- Streamlit stays at the locked 1.63.0.
+- Streamlit stays at the locked 1.67.0. New dependency bumps happen only in their own chore PR, never inside a phase PR.
 - IBM Plex is self-hosted. If the font or licence download fails, set `font = "IBM Plex Sans:https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"` and `codeFont` likewise, skip `static/fonts`, and list it as a deviation.
 - The reviewer name comes from `P2P_REVIEWER_NAME`; there is no login or assignment model.
 - Streamlit approximations are accepted: count in the nav title instead of a badge, a collapsing sidebar instead of a top row, text colours instead of chips inside the Cases table, a popover with a copyable link instead of one-click copy, a top bar that is not sticky.
