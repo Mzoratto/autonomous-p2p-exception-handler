@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import statistics
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, get_type_hints
 from uuid import uuid4
@@ -54,6 +57,16 @@ def _is_true(value: str | bool | None) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").lower() in {"1", "true", "yes", "on"}
+
+
+HUMAN_SOURCES = {"HUMAN_APPROVED", "HUMAN_OVERRIDDEN"}
+
+
+def _value_by_currency(rows: list[dict]) -> dict[str, str]:
+    totals: dict[str, Decimal] = {}
+    for row in rows:
+        totals[row["currency"]] = totals.get(row["currency"], Decimal("0")) + Decimal(row["total"])
+    return {currency: f"{amount:.2f}" for currency, amount in sorted(totals.items())}
 
 
 def resolve_rules_path(explicit_path: str | Path | None = None) -> Path:
@@ -108,9 +121,10 @@ def create_runtime(
     resolved_rules_path = resolve_rules_path(rules_path)
     rules = BusinessRules.load(resolved_rules_path)
     database = Database(url)
-    database.create_all()
     repository = SqliteRepository(database)
+    # Several processes may open the same file at once; migrate and seed one at a time.
     with repository.command_lock():
+        database.create_all()
         if auto_seed and not repository.has_data():
             seed_database(database)
 
@@ -306,45 +320,129 @@ class CaseService:
                 ]
             return case
 
+    def refresh_open_cases(self) -> None:
+        """Reconcile every case that is not COMPLETED; a broken case is recorded, not raised."""
+        repository = self.runtime.repository
+        with repository.command_lock():
+            for case_id in repository.open_case_ids():
+                try:
+                    self._reconcile(case_id)
+                except ValueError as exc:
+                    repository.record_error(case_id, f"{type(exc).__name__}: {exc}")
+
     def list_cases(self, status: str | None = None) -> list[dict]:
-        with self.runtime.repository.command_lock():
-            cases = [
-                self._reconcile(item["case_id"]) for item in self.runtime.repository.list_cases()
-            ]
-            return [case for case in cases if status is None or case["status"] == status]
+        repository = self.runtime.repository
+        with repository.command_lock():
+            for case_id in repository.open_case_ids():
+                self._reconcile(case_id)
+            return repository.list_cases(status)
+
+    def query_cases(self, **criteria: Any) -> tuple[list[dict], int]:
+        return self.runtime.repository.query_cases(**criteria)
+
+    def view_counts(self) -> dict[str, int]:
+        return self.runtime.repository.view_counts()
 
     def pending_review_count(self) -> int:
-        return len(self.list_cases("PENDING_REVIEW"))
+        return self.view_counts()["review"]
 
-    def metrics(self) -> dict[str, Any]:
-        cases = self.list_cases()
-        completed = [item for item in cases if item["status"] == "COMPLETED"]
-        outcomes = [item["state"].get("outcome", {}) for item in completed]
-        autonomous = [item for item in outcomes if item.get("source") == "AUTONOMOUS"]
-        confidences = [
-            float(item["state"]["resolution"]["confidence"])
-            for item in cases
-            if item["state"].get("resolution")
+    def summary(self, now: datetime | None = None) -> dict[str, Any]:
+        """Overview figures computed from the projected case columns."""
+        now = now or datetime.now(UTC)
+        rows, total = self.runtime.repository.query_cases(limit=None)
+        for row in rows:
+            for key in ("created_at", "review_requested_at", "completed_at"):
+                row[key] = datetime.fromisoformat(row[key]) if row[key] else None
+        pending = [row for row in rows if row["status"] == "PENDING_REVIEW"]
+        completed = [row for row in rows if row["status"] == "COMPLETED"]
+
+        def waited(row: dict) -> float:
+            since = row["review_requested_at"] or row["created_at"] or now
+            return max(0.0, (now - since).total_seconds())
+
+        waits = [waited(row) for row in pending]
+        day_ago = now - timedelta(days=1)
+        if any(row["created_at"] and row["created_at"] <= day_ago for row in rows):
+            pending_day_ago = sum(
+                1
+                for row in rows
+                if row["review_requested_at"]
+                and row["review_requested_at"] <= day_ago
+                and (row["completed_at"] is None or row["completed_at"] > day_ago)
+            )
+            trend_vs_yesterday: int | None = len(pending) - pending_day_ago
+        else:
+            trend_vs_yesterday = None
+
+        def autonomous(selection: list[dict]) -> int:
+            return sum(
+                1
+                for row in selection
+                if row["status"] == "COMPLETED" and row["outcome_source"] == "AUTONOMOUS"
+            )
+
+        def created_between(start: datetime, end: datetime) -> list[dict]:
+            return [row for row in rows if row["created_at"] and start < row["created_at"] <= end]
+
+        this_week = created_between(now - timedelta(days=7), now)
+        last_week = created_between(now - timedelta(days=14), now - timedelta(days=7))
+        trend_points = (
+            (autonomous(this_week) / len(this_week) - autonomous(last_week) / len(last_week)) * 100
+            if this_week and last_week
+            else None
+        )
+        ai_reviewed = [
+            row for row in completed if row["ai_action"] and row["outcome_source"] in HUMAN_SOURCES
         ]
-        actions: dict[str, int] = {}
-        exception_types: dict[str, int] = {}
-        for outcome in outcomes:
-            action = outcome.get("action", "UNKNOWN")
-            actions[action] = actions.get(action, 0) + 1
-        for item in cases:
-            for discrepancy in item["state"].get("match_result", {}).get("discrepancies", []):
-                name = discrepancy["type"]
-                exception_types[name] = exception_types.get(name, 0) + 1
-        counts_by_status: dict[str, int] = {}
-        for item in cases:
-            counts_by_status[item["status"]] = counts_by_status.get(item["status"], 0) + 1
+        overridden = sum(1 for row in ai_reviewed if row["outcome_source"] == "HUMAN_OVERRIDDEN")
+        outcome_rows = {
+            "review": pending,
+            "approved": [row for row in completed if row["outcome_action"] == "APPROVE"],
+            "rejected": [row for row in completed if row["outcome_action"] == "REJECT"],
+            "request_info": [row for row in completed if row["outcome_action"] == "REQUEST_INFO"],
+        }
+        longest = sorted(pending, key=waited, reverse=True)[:12]
+        counts = self.view_counts()
+        counts["processing"] = total - len(pending) - len(completed)
         return {
-            "total": len(cases),
-            "counts_by_status": counts_by_status,
-            "autonomous_rate": len(autonomous) / len(completed) if completed else 0,
-            "average_confidence": sum(confidences) / len(confidences) if confidences else 0,
-            "actions": actions,
-            "exception_types": exception_types,
+            "total": total,
+            "counts": counts,
+            "awaiting": {
+                "count": len(pending),
+                "oldest_wait_seconds": max(waits) if waits else None,
+                "median_wait_seconds": statistics.median(waits) if waits else None,
+                "value_by_currency": _value_by_currency(pending),
+                "trend_vs_yesterday": trend_vs_yesterday,
+            },
+            "auto_resolution": {
+                "autonomous": autonomous(rows),
+                "total": total,
+                "rate": autonomous(rows) / total if total else None,
+                "trend_points": trend_points,
+            },
+            "override": {
+                "overridden": overridden,
+                "ai_reviewed": len(ai_reviewed),
+                "rate": overridden / len(ai_reviewed) if ai_reviewed else None,
+            },
+            "outcomes": [
+                {
+                    "key": key,
+                    "count": len(selection),
+                    "value_by_currency": _value_by_currency(selection),
+                }
+                for key, selection in outcome_rows.items()
+            ],
+            "waiting": [
+                {
+                    "case_id": row["case_id"],
+                    "invoice_id": row["invoice_id"],
+                    "max_severity": row["max_severity"],
+                    "wait_seconds": waited(row),
+                }
+                for row in longest
+            ],
+            "sla_hours": self.runtime.rules.review.sla_hours,
         }
 
     @staticmethod

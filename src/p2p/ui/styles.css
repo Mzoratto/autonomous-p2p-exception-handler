@@ -62,41 +62,38 @@
 .p2p-page-header h1 { color: var(--ink); font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; margin: 0; padding: 0; }
 .p2p-page-header p { color: var(--ink-2); font-size: 14px; max-width: 720px; margin: 8px 0 0; }
 .p2p-section-title { color: var(--ink); font-size: 16px; font-weight: 600; margin: 0 0 14px; }
-.p2p-section-subtitle { color: var(--muted); font-size: 13px; margin-top: -10px; margin-bottom: 12px; }
+.p2p-section-title.p2p-flush { margin: 0; padding: 0; }
+.p2p-card { display: flex; flex-direction: column; gap: 12px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); }
+.p2p-panel-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
 
-/* Cards and metrics */
-.p2p-metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 24px; }
-.p2p-metric-card { min-height: 116px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; }
-.p2p-metric-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.p2p-metric-label { color: var(--muted); font-size: 13px; font-weight: 500; }
-.p2p-metric-icon { color: var(--blue); }
-.p2p-metric-value { color: var(--ink); font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1; margin-top: 12px; font-variant-numeric: tabular-nums; }
-.p2p-metric-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
-.p2p-metric-note.p2p-positive { color: var(--status-approved-fg); font-weight: 500; }
-.p2p-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 20px; margin-bottom: 16px; }
-.p2p-panel-kicker { color: var(--ink); font-size: 16px; font-weight: 600; margin-bottom: 16px; }
-.p2p-dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-bottom: 24px; }
-.p2p-dashboard-grid .p2p-panel { min-height: 280px; margin: 0; }
-.p2p-stacked-bar { display: flex; height: 10px; overflow: hidden; border-radius: var(--radius-chip); background: var(--line-soft); margin: 4px 0 16px; }
-.p2p-stacked-segment { min-width: 3px; height: 100%; }
-.p2p-outcome-row { display: grid; grid-template-columns: minmax(96px, 1fr) 2fr auto; gap: 12px; align-items: center; min-height: 34px; }
-.p2p-outcome-name { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 13px; }
-.p2p-outcome-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
-.p2p-outcome-track { height: 6px; overflow: hidden; border-radius: var(--radius-chip); background: var(--line-soft); }
-.p2p-outcome-fill { height: 100%; border-radius: var(--radius-chip); }
-.p2p-outcome-value { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.p2p-outcome-value em { color: var(--muted); font-style: normal; }
-.p2p-breakdown-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 40px; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); font-size: 13px; }
-.p2p-breakdown-row:last-child { border-bottom: 0; }
-.p2p-count-chip { display: grid; place-items: center; min-width: 26px; height: 22px; padding: 0 6px; border-radius: 6px; background: var(--blue-soft); color: var(--link); font-size: 12px; font-weight: 600; }
-.p2p-case-table-wrap { overflow-x: auto; }
-.p2p-case-table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
-.p2p-case-table th { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-align: left; text-transform: uppercase; padding: 0 8px 10px; border-bottom: 1px solid var(--line); }
-.p2p-case-table td { color: var(--ink-2); font-size: 13px; padding: 10px 8px; border-bottom: 1px solid var(--line-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.p2p-case-table tbody tr:last-child td { border-bottom: 0; }
-.p2p-case-table .p2p-case-link { color: var(--link); font-family: var(--mono); font-size: 12px; }
-.p2p-case-table .p2p-money { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500; }
-.p2p-empty-mini { color: var(--muted); font-size: 13px; padding: 12px 0 4px; }
+/* Overview */
+.p2p-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 4px; }
+.p2p-kpi { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); }
+.p2p-kpi-label { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.p2p-kpi-value { font-size: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.p2p-kpi-note { font-size: 13px; color: var(--muted); }
+.p2p-kpi-trend { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; }
+.p2p-kpi-trend .p2p-icon { font-size: 16px; }
+.st-key-overview-panels > div { flex: 1 1 420px; min-width: min(420px, 100%); }
+.p2p-attention-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-width: 0; padding: 4px 0; }
+.p2p-attention-main { display: flex; flex-direction: column; min-width: 0; }
+.p2p-attention-main strong { font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p2p-attention-main code { font-family: var(--mono); font-size: 12px; color: var(--muted); background: none; padding: 0; }
+.p2p-attention-amount { font-weight: 500; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.p2p-sla-legend { display: inline-flex; align-items: center; gap: 6px; }
+.p2p-sla-legend i { width: 12px; border-top: 2px dashed var(--sev-critical-fg); }
+.p2p-outcome-bar { display: flex; gap: 2px; height: 12px; overflow: hidden; border-radius: var(--radius-chip); background: var(--page); }
+.p2p-outcome-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.p2p-outcome-item { display: flex; gap: 10px; align-items: flex-start; }
+.p2p-outcome-item i { flex: 0 0 10px; width: 10px; height: 10px; margin-top: 5px; border-radius: 3px; }
+.p2p-outcome-item > div { display: flex; flex-direction: column; }
+.p2p-outcome-item strong { font-weight: 500; color: var(--ink); }
+.p2p-outcome-item span { font-size: 13px; color: var(--muted); }
+.p2p-table-wrap.p2p-borderless { border: 0; border-radius: 0; }
+
+/* Cases */
+.st-key-cases-detail > :has(> .st-key-cases-detail-case) { flex: 1 1 520px; min-width: min(520px, 100%); }
+.p2p-outcome-panel .p2p-status-pill { align-self: flex-start; }
 
 /* Status and severity chips */
 .p2p-status-pill { display: inline-flex; align-items: center; gap: 6px; width: max-content; border-radius: var(--radius-chip); padding: 3px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -232,6 +229,7 @@
 .p2p-queue-wait { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
 .p2p-queue-wait .p2p-icon { font-size: 15px; }
 .p2p-queue-late { color: var(--sev-critical-fg); font-weight: 600; }
+.p2p-queue-recovery { align-self: flex-start; padding: 1px 8px; border-radius: var(--radius-chip); background: var(--status-review-bg); color: var(--status-review-fg); font-size: 12px; font-weight: 600; }
 .p2p-panel-title { margin: 0; padding: 0; font-size: 16px; font-weight: 600; color: var(--ink); }
 .p2p-recommendation { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--surface-subtle); }
 .p2p-recommendation-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -295,7 +293,6 @@
 
 @media (max-width: 700px) {
   .p2p-page-header { display: block; }
-  .p2p-outcome-row { grid-template-columns: 96px 1fr auto; gap: 8px; }
   .p2p-field-errors { grid-template-columns: 1fr; }
   .p2p-owner-row { grid-template-columns: 1fr; gap: 2px; }
   .p2p-owner-head span:last-child { display: none; }

@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,38 @@ def open_page(page: str, **query_params: str) -> AppTest:
     return at
 
 
+def drop_checkpoint(database_url: str, case_id: str) -> None:
+    with sqlite3.connect(database_url.removeprefix("sqlite:///")) as connection:
+        for table in ("checkpoints", "writes"):
+            connection.execute(f"DELETE FROM {table} WHERE thread_id = ?", (case_id,))
+
+
+def test_review_queue_stays_usable_when_a_case_lost_its_checkpoint(database_url):
+    broken, healthy = process(database_url, "03_large_price_variance", "06_missing_po")
+    drop_checkpoint(database_url, broken)
+
+    at = open_page("review", case=broken)
+
+    assert not at.exception
+    assert any(f"{broken} needs recovery" in error.value for error in at.error)
+    queue = {button.key for button in at.button if button.key.startswith("queue_open_")}
+    assert queue == {f"queue_open_{broken}", f"queue_open_{healthy}"}
+    assert not any(radio.key.startswith("review_decision_") for radio in at.radio)
+
+    at.button(key=f"queue_open_{healthy}").click().run()
+    assert f"review_decision_{healthy}" in {radio.key for radio in at.radio}
+
+
+def test_case_detail_reports_a_case_that_lost_its_checkpoint(database_url):
+    [broken] = process(database_url, "03_large_price_variance")
+    drop_checkpoint(database_url, broken)
+
+    at = open_page("cases", case=broken)
+
+    assert not at.exception
+    assert any(f"{broken} needs recovery" in error.value for error in at.error)
+
+
 @pytest.mark.parametrize("page", PAGES)
 def test_page_renders_on_empty_database(database_url, page):
     assert not open_page(page).exception
@@ -51,11 +84,61 @@ def test_page_renders_with_completed_pending_and_rejected_cases(database_url, pa
     assert not open_page(page).exception
 
 
-def test_case_query_param_selects_the_case(database_url):
+def html(at: AppTest) -> str:
+    return "".join(element.proto.body for element in at.get("html"))
+
+
+def test_case_query_param_opens_the_case_detail(database_url):
     case_ids = process(database_url, "01_exact_match", "08_duplicate_invoice")
 
     for case_id in case_ids:
-        assert open_page("cases", case=case_id).selectbox(key="cases_case").value == case_id
+        at = open_page("cases", case=case_id)
+        assert not at.exception
+        assert f'<span class="p2p-case-id">{case_id}</span>' in html(at)
+
+
+def test_unknown_case_query_param_reports_it(database_url):
+    at = open_page("cases", case="CASE-NOPE")
+
+    assert [error.value for error in at.error] == ["Case CASE-NOPE was not found."]
+
+
+def test_status_query_param_filters_the_case_table(database_url):
+    rejected = process(
+        database_url, "01_exact_match", "03_large_price_variance", "08_duplicate_invoice"
+    )[2]
+
+    at = open_page("cases", status="rejected")
+
+    assert at.pills(key="cases_view").value == "rejected"
+    assert list(at.dataframe[0].value["Case"]) == [rejected]
+
+
+def test_overview_shows_queue_value_and_auto_resolution(database_url):
+    process(
+        database_url,
+        "01_exact_match",
+        "03_large_price_variance",
+        "08_duplicate_invoice",
+        "10_ambiguous_high_value",
+    )
+
+    body = html(open_page("overview"))
+
+    assert "€62,200.00" in body
+    assert "2 of 4 without a reviewer" in body
+    assert "0 of 0 AI-recommended decisions were changed" in body
+
+
+def test_running_all_scenarios_from_an_empty_overview(database_url):
+    at = open_page("overview")
+
+    at.button(key="overview_run_all_empty").click().run()
+
+    assert not at.exception
+    assert at.toast[0].value == "10 scenarios processed · 7 need review"
+    at.button(key="overview_run_all_top").click().run()
+    assert at.toast[0].value == "Demo scenarios were already processed · 7 awaiting review"
 
 
 def test_review_query_param_selects_a_pending_case(database_url):

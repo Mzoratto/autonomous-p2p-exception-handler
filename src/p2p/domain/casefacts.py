@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_EVEN, Decimal
+
 SEVERITY_RANK = {"CRITICAL": 4, "MATERIAL": 3, "WARNING": 2, "INFO": 1}
 HIGH_VALUE_RULE = "risk.human_review_invoice_value"
+CENT = Decimal("0.01")
 
 
 def primary_exception(state: dict) -> tuple[str | None, str | None, int]:
@@ -20,3 +23,29 @@ def primary_exception(state: dict) -> tuple[str | None, str | None, int]:
     if HIGH_VALUE_RULE in triggered:
         return "HIGH_VALUE", "WARNING", 0
     return None, None, 0
+
+
+def total_cents(total: object) -> int:
+    return int(Decimal(str(total)).quantize(CENT, rounding=ROUND_HALF_EVEN) * 100)
+
+
+def project(invoice: dict, state: dict) -> dict:
+    """The queryable case columns (everything except timestamps) for one invoice and state."""
+    exception, severity, _ = primary_exception(state)
+    resolution = state.get("resolution") or {}
+    outcome = state.get("outcome") or {}
+    confidence = resolution.get("confidence")
+    return {
+        "supplier_id": invoice["supplier_id"],
+        "supplier_name": invoice["supplier_name"],
+        "po_number": invoice.get("po_number"),
+        "currency": invoice["currency"],
+        "total_cents": total_cents(invoice["total"]),
+        "primary_exception": exception,
+        "max_severity": severity,
+        "severity_rank": SEVERITY_RANK.get(severity or "", 0),
+        "ai_action": resolution.get("action"),
+        "ai_confidence": None if confidence is None else float(confidence),
+        "outcome_action": outcome.get("action"),
+        "outcome_source": outcome.get("source"),
+    }

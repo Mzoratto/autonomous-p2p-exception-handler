@@ -23,7 +23,6 @@ from p2p.ui.viewmodels import (
     default_tab,
     local_zone,
     match_view,
-    outcome_view,
     policy_view,
     tab_labels,
     timeline,
@@ -70,14 +69,6 @@ def header_html(view: HeaderView) -> str:
       <div class="p2p-meta-grid">{meta}</div>
     </section>
     """
-
-
-def outcome_html(rows: list[tuple[str, str]]) -> str:
-    items = "".join(
-        f'<div class="p2p-meta"><span>{h(key)}</span><strong>{h(value)}</strong></div>'
-        for key, value in rows
-    )
-    return f'<section class="p2p-outcome-card"><div class="p2p-meta-grid">{items}</div></section>'
 
 
 def match_html(view: MatchView) -> str:
@@ -296,10 +287,6 @@ def render_case_detail(case: dict, app: CaseService) -> None:
     render_html(header_html(header))
     with st.popover(":material/link: Copy link"):
         st.code(case_link(case["case_id"]), language=None)
-    outcome = outcome_view(case)
-    if outcome:
-        render_html(outcome_html(outcome))
-
     labels = tab_labels(match, story, policy, len(events))
     tabs = dict(
         zip(

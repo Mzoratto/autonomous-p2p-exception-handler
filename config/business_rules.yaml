@@ -15,3 +15,5 @@ missing_receipt:
   require_human_review: true
 reflection:
   max_iterations: 3
+review:
+  sla_hours: 24

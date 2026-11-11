@@ -183,13 +183,15 @@ Operational thresholds live in [`config/business_rules.yaml`](config/business_ru
 
 Duplicate rejection and missing-document review switches must remain true; startup rejects unsafe combinations.
 
-This includes price and quantity tolerances, confidence gates, high-value review rules, duplicate handling, missing-document controls, and the reflection limit.
+This includes price and quantity tolerances, confidence gates, high-value review rules, duplicate handling, missing-document controls, the reflection limit, and the review target (`review.sla_hours`, default 24) drawn on the Overview's waiting chart.
 
 Financial thresholds are deliberately kept out of prompts.
 
 For local runs, the rules file is resolved from the project directory. Packaged deployments can use `P2P_RULES_PATH`, avoiding any dependency on the Python installation path.
 
 The dashboard has no login. Reviews are signed with the name in `P2P_REVIEWER_NAME` (default `Demo Reviewer`), and its initials appear in the top bar.
+
+The case table stores a queryable summary of each case (supplier, amount, primary exception, AI recommendation, outcome and key timestamps) next to the full payloads. Opening a database created before these columns existed adds them and backfills existing cases from their payloads and audit events; the step runs once and is safe to repeat.
 
 ## Project scope
 
