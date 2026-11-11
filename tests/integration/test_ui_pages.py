@@ -1,0 +1,64 @@
+from pathlib import Path
+
+import pytest
+from streamlit.testing.v1 import AppTest
+
+from p2p.application.service import CaseService, create_runtime
+from p2p.infrastructure.database import demo_invoices
+
+REPO = Path(__file__).parents[2]
+PAGES = ["overview", "process", "review", "cases", "about"]
+
+
+@pytest.fixture
+def database_url(tmp_path, monkeypatch) -> str:
+    url = f"sqlite:///{tmp_path / 'pages.db'}"
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("P2P_DATABASE_URL", url)
+    monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
+    return url
+
+
+def process(database_url: str, *scenarios: str) -> list[str]:
+    runtime = create_runtime(database_url=database_url, demo_mode=True)
+    try:
+        app = CaseService(runtime)
+        invoices = demo_invoices()
+        return [app.process_invoice(invoices[name])["case_id"] for name in scenarios]
+    finally:
+        runtime.close()
+
+
+def open_page(page: str, **query_params: str) -> AppTest:
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15)
+    for key, value in query_params.items():
+        at.query_params[key] = value
+    at.run()
+    if page != "overview":
+        at.switch_page(f"src/p2p/ui/pages/{page}.py").run()
+    return at
+
+
+@pytest.mark.parametrize("page", PAGES)
+def test_page_renders_on_empty_database(database_url, page):
+    assert not open_page(page).exception
+
+
+@pytest.mark.parametrize("page", PAGES)
+def test_page_renders_with_completed_pending_and_rejected_cases(database_url, page):
+    process(database_url, "01_exact_match", "03_large_price_variance", "08_duplicate_invoice")
+    assert not open_page(page).exception
+
+
+def test_case_query_param_selects_the_case(database_url):
+    case_ids = process(database_url, "01_exact_match", "08_duplicate_invoice")
+
+    for case_id in case_ids:
+        assert open_page("cases", case=case_id).selectbox(key="cases_case").value == case_id
+
+
+def test_review_query_param_selects_a_pending_case(database_url):
+    case_ids = process(database_url, "03_large_price_variance", "06_missing_po")
+
+    for case_id in case_ids:
+        assert open_page("review", case=case_id).selectbox(key="review_case").value == case_id

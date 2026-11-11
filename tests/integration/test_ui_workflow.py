@@ -1,60 +1,71 @@
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
+from p2p.application.service import CaseService, create_runtime
+from p2p.domain.models import DecisionType
 
-def widget_with_label(widgets, label: str):
-    return next(widget for widget in widgets if widget.label == label)
+REPO = Path(__file__).parents[2]
+PAGES = "src/p2p/ui/pages"
 
 
-def test_process_invoice_exposes_input_analysis_and_resolution(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
+@pytest.fixture
+def database_url(tmp_path, monkeypatch) -> str:
+    url = f"sqlite:///{tmp_path / 'ui.db'}"
     monkeypatch.setenv("DEMO_MODE", "true")
-    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{tmp_path / 'ui.db'}")
-    monkeypatch.setenv(
-        "P2P_RULES_PATH",
-        str(Path("config/business_rules.yaml").resolve()),
-    )
-
-    app_path = Path(__file__).parents[2] / "app.py"
-    app = AppTest.from_file(app_path, default_timeout=15).run()
-    widget_with_label(app.radio, "Mobile navigation").set_value("Process Invoice").run()
-
-    stage = widget_with_label(app.radio, "Workflow stage")
-    assert stage.options == ["Input", "Analyze", "Resolve"]
-    assert stage.value == "Input"
-
-    widget_with_label(app.button, "Validate and continue").click().run()
-    assert widget_with_label(app.radio, "Workflow stage").value == "Analyze"
-
-    widget_with_label(app.button, "Run analysis").click().run()
-    assert widget_with_label(app.radio, "Workflow stage").value == "Resolve"
-    assert any("completed autonomously" in message.value for message in app.success)
+    monkeypatch.setenv("P2P_DATABASE_URL", url)
+    monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
+    return url
 
 
-def test_process_banner_refreshes_after_human_review(tmp_path, monkeypatch):
-    from p2p.domain.models import DecisionType
+def stored_case(database_url: str, case_id: str) -> dict:
+    runtime = create_runtime(database_url=database_url, demo_mode=True)
+    try:
+        return CaseService(runtime).get_case(case_id)
+    finally:
+        runtime.close()
 
-    monkeypatch.setenv("DEMO_MODE", "true")
-    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{tmp_path / 'review-ui.db'}")
-    monkeypatch.setenv("P2P_RULES_PATH", str(Path("config/business_rules.yaml").resolve()))
-    app = AppTest.from_file(Path(__file__).parents[2] / "app.py", default_timeout=15).run()
-    widget_with_label(app.radio, "Mobile navigation").set_value("Process Invoice").run()
-    widget_with_label(app.selectbox, "Scenario").set_value(
-        Path("data/demo/invoices/03_large_price_variance.json")
+
+def process_scenario(at: AppTest, scenario: str) -> str:
+    at.switch_page(f"{PAGES}/process.py").run()
+    at.selectbox(key="process_scenario").set_value(
+        Path(f"data/demo/invoices/{scenario}.json")
     ).run()
-    widget_with_label(app.button, "Validate and continue").click().run()
-    widget_with_label(app.button, "Run analysis").click().run()
-    assert any("waiting for a reviewer" in message.value for message in app.warning)
-    widget_with_label(app.radio, "Mobile navigation").set_value("Review Queue").run()
-    widget_with_label(app.radio, "Action").set_value(DecisionType.REQUEST_INFO).run()
-    widget_with_label(app.button, "Submit and resume workflow").click().run()
-    assert not app.exception
-    assert app.toast[0].value == "Request info recorded for INV-LARGE · 0 left in queue"
-    widget_with_label(app.radio, "Mobile navigation").set_value("Process Invoice").run()
-    widget_with_label(app.radio, "Workflow stage").set_value("Resolve").run()
-    assert not app.exception
-    assert not any("waiting for a reviewer" in message.value for message in app.warning)
-    assert any("completed after human review" in message.value for message in app.success)
+    at.button(key="process_validate").click().run()
+    at.button(key="process_run").click().run()
+    assert not at.exception
+    return at.session_state["invoice_workflow_case_id"]
+
+
+def rendered_html(at: AppTest) -> str:
+    return "".join(element.proto.body for element in at.get("html"))
+
+
+def test_processing_exact_match_completes_autonomously(database_url):
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
+
+    case_id = process_scenario(at, "01_exact_match")
+
+    case = stored_case(database_url, case_id)
+    assert case["status"] == "COMPLETED"
+    assert case["state"]["outcome"]["action"] == "APPROVE"
+    assert case["state"]["outcome"]["source"] == "AUTONOMOUS"
+
+
+def test_process_result_shows_durable_status_after_human_review(database_url):
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
+    case_id = process_scenario(at, "03_large_price_variance")
+    assert any("waiting for a reviewer" in message.value for message in at.warning)
+
+    at.switch_page(f"{PAGES}/review.py").run()
+    at.radio(key="review_action").set_value(DecisionType.REQUEST_INFO).run()
+    at.button(key="review_submit").click().run()
+    assert not at.exception
+    assert at.toast[0].value == "Request info recorded for INV-LARGE · 0 left in queue"
+
+    at.switch_page(f"{PAGES}/process.py").run()
+    assert not at.exception
+    assert not any("waiting for a reviewer" in message.value for message in at.warning)
+    assert "Request info · Human" in rendered_html(at)
+    assert stored_case(database_url, case_id)["state"]["outcome"]["action"] == "REQUEST_INFO"
