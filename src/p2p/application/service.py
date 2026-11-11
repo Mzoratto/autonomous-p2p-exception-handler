@@ -299,6 +299,9 @@ class CaseService:
             ]
             return [case for case in cases if status is None or case["status"] == status]
 
+    def pending_review_count(self) -> int:
+        return len(self.list_cases("PENDING_REVIEW"))
+
     def metrics(self) -> dict[str, Any]:
         cases = self.list_cases()
         completed = [item for item in cases if item["status"] == "COMPLETED"]

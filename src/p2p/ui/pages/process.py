@@ -5,12 +5,20 @@ from pathlib import Path
 import streamlit as st
 from pydantic import ValidationError
 
-from p2p.application.service import CaseService
 from p2p.domain.models import Invoice
 from p2p.ui.components.case_detail import render_case
 from p2p.ui.components.chips import h, render_html
-from p2p.ui.components.shell import navigate_to_page, page_header, render_field_errors, show_failure
+from p2p.ui.components.shell import (
+    page_header,
+    render_field_errors,
+    show_failure,
+    switch_to,
+    top_bar,
+)
+from p2p.ui.runtime import service
 from p2p.ui.viewmodels import format_money, validation_rows
+
+STAGES = ["Input", "Analyze", "Resolve"]
 
 
 def queue_invoice_workflow_stage(stage_name: str) -> None:
@@ -30,22 +38,29 @@ def reset_invoice_workflow() -> None:
 def render_validated_invoice(invoice: Invoice) -> None:
     render_html(
         f"""
-        <div class="case-summary-grid">
-          <div class="summary-card"><div class="summary-label">Invoice</div><div class="summary-value">{h(invoice.invoice_id)}</div></div>
-          <div class="summary-card"><div class="summary-label">Supplier</div><div class="summary-value" title="{h(invoice.supplier_name)}">{h(invoice.supplier_name)}</div></div>
-          <div class="summary-card"><div class="summary-label">Purchase order</div><div class="summary-value">{h(invoice.po_number or "Missing")}</div></div>
-          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(format_money(invoice.total, invoice.currency))}</div></div>
+        <div class="p2p-case-summary-grid">
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice</div><div class="p2p-summary-value">{h(invoice.invoice_id)}</div></div>
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Supplier</div><div class="p2p-summary-value" title="{h(invoice.supplier_name)}">{h(invoice.supplier_name)}</div></div>
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Purchase order</div><div class="p2p-summary-value">{h(invoice.po_number or "Missing")}</div></div>
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice total</div><div class="p2p-summary-value">{h(format_money(invoice.total, invoice.currency))}</div></div>
         </div>
         """,
     )
 
 
-def render(app: CaseService) -> None:
+def sync_stage() -> None:
+    st.session_state["process_stage"] = st.session_state["invoice_workflow_stage"]
+
+
+def render() -> None:
+    app = service()
     pending_stage = st.session_state.pop("invoice_workflow_pending_stage", None)
     if pending_stage:
-        st.session_state["invoice_workflow_stage"] = pending_stage
-    st.session_state.setdefault("invoice_workflow_stage", "Input")
+        st.session_state["process_stage"] = pending_stage
+    # The stage widget's own state is dropped while another page is open; this mirror is not.
+    st.session_state["invoice_workflow_stage"] = st.session_state.get("process_stage", "Input")
 
+    top_bar(["Process invoice"], "/process")
     page_header(
         "New workflow",
         "Process an invoice",
@@ -54,15 +69,16 @@ def render(app: CaseService) -> None:
     with st.container(key="invoice-workflow-stepper"):
         workflow_stage = st.radio(
             "Workflow stage",
-            ["Input", "Analyze", "Resolve"],
+            STAGES,
             key="invoice_workflow_stage",
+            on_change=sync_stage,
             horizontal=True,
             label_visibility="collapsed",
         )
 
     if workflow_stage == "Input":
         with st.container(border=True):
-            render_html('<div class="section-title">1 · Select invoice input</div>')
+            render_html('<div class="p2p-section-title">1 · Select invoice input</div>')
             source = st.radio(
                 "Input source",
                 ["Demo scenario", "Upload JSON", "Paste JSON"],
@@ -78,6 +94,7 @@ def render(app: CaseService) -> None:
                     "Scenario",
                     files,
                     format_func=lambda item: item.stem.replace("_", " ").title(),
+                    key="process_scenario",
                 )
                 payload = chosen.read_text(encoding="utf-8")
                 with st.expander("Preview invoice JSON"):
@@ -93,6 +110,7 @@ def render(app: CaseService) -> None:
                 type="primary",
                 disabled=not payload,
                 width="stretch",
+                key="process_validate",
             ):
                 try:
                     st.session_state["invoice_workflow_invoice"] = app.parse_invoice(payload or "")
@@ -119,7 +137,7 @@ def render(app: CaseService) -> None:
 
     if workflow_stage == "Analyze":
         with st.container(border=True):
-            render_html('<div class="section-title">2 · Analyze the exception</div>')
+            render_html('<div class="p2p-section-title">2 · Analyze the exception</div>')
             st.success("Invoice structure and arithmetic are valid.")
             render_validated_invoice(invoice)
             st.caption(
@@ -135,7 +153,7 @@ def render(app: CaseService) -> None:
                     args=("Input",),
                 )
             with run:
-                if st.button("Run analysis", type="primary", width="stretch"):
+                if st.button("Run analysis", type="primary", width="stretch", key="process_run"):
                     try:
                         with st.status("Analyzing invoice exception…", expanded=True) as status:
                             st.write("Retrieving purchase order, receipt, and supplier evidence")
@@ -150,7 +168,6 @@ def render(app: CaseService) -> None:
                             )
                         st.session_state["invoice_workflow_case_id"] = result["case_id"]
                         st.session_state["invoice_workflow_status"] = result["status"]
-                        st.session_state["selected_case"] = result["case_id"]
                         queue_invoice_workflow_stage("Resolve")
                         st.rerun()
                     except Exception as exc:
@@ -195,12 +212,15 @@ def render(app: CaseService) -> None:
             on_click=reset_invoice_workflow,
         )
     with actions[1]:
-        destination = "Review Queue" if case.get("status") == "PENDING_REVIEW" else "Cases"
-        st.button(
-            f"Open {destination.lower()}",
+        pending = case.get("status") == "PENDING_REVIEW"
+        if st.button(
+            "Open review queue" if pending else "Open cases",
             type="primary",
             width="stretch",
-            on_click=navigate_to_page,
-            args=(destination,),
-        )
+            key="process_open_case",
+        ):
+            switch_to("review" if pending else "cases", case=case_id)
     render_case(case)
+
+
+render()

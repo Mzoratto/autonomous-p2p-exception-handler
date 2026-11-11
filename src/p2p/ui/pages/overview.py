@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from p2p.application.service import CaseService
 from p2p.ui.components.chips import h, icon, render_html, status_pill
-from p2p.ui.components.shell import page_header
+from p2p.ui.components.shell import page_header, top_bar
+from p2p.ui.runtime import service
 from p2p.ui.viewmodels import OUTCOME_LABELS, display_status, format_money, label_exception
 
 
@@ -16,10 +16,10 @@ def metric_card(
     note_tone: str = "",
 ) -> str:
     return f"""
-      <div class="metric-card">
-        <div class="metric-top"><span class="metric-label">{h(label)}</span><span class="metric-icon">{icon(icon_name)}</span></div>
-        <div class="metric-value">{h(value)}</div>
-        <div class="metric-note {h(note_tone)}">{h(note)}</div>
+      <div class="p2p-metric-card">
+        <div class="p2p-metric-top"><span class="p2p-metric-label">{h(label)}</span><span class="p2p-metric-icon">{icon(icon_name)}</span></div>
+        <div class="p2p-metric-value">{h(value)}</div>
+        <div class="p2p-metric-note p2p-{h(note_tone)}">{h(note)}</div>
       </div>
     """
 
@@ -40,19 +40,19 @@ def render_dashboard_analysis(metrics: dict) -> None:
         label = OUTCOME_LABELS.get(action, "Other")
         percent = count / total_actions * 100 if total_actions else 0
         segments.append(
-            f'<span class="stacked-segment" style="width:{percent:.1f}%;background:{color}"></span>'
+            f'<span class="p2p-stacked-segment" style="width:{percent:.1f}%;background:{color}"></span>'
         )
         outcome_rows.append(
             f"""
-            <div class="outcome-row">
-              <div class="outcome-name"><i class="outcome-dot" style="background:{color}"></i>{h(label)}</div>
-              <div class="outcome-track"><div class="outcome-fill" style="width:{percent:.1f}%;background:{color}"></div></div>
-              <div class="outcome-value">{count} <em>({percent:.0f}%)</em></div>
+            <div class="p2p-outcome-row">
+              <div class="p2p-outcome-name"><i class="p2p-outcome-dot" style="background:{color}"></i>{h(label)}</div>
+              <div class="p2p-outcome-track"><div class="p2p-outcome-fill" style="width:{percent:.1f}%;background:{color}"></div></div>
+              <div class="p2p-outcome-value">{count} <em>({percent:.0f}%)</em></div>
             </div>
             """
         )
     if not outcome_rows:
-        outcome_rows.append('<div class="empty-mini">No finalized outcomes yet.</div>')
+        outcome_rows.append('<div class="p2p-empty-mini">No finalized outcomes yet.</div>')
 
     exception_rows = []
     for exception, count in sorted(
@@ -62,25 +62,25 @@ def render_dashboard_analysis(metrics: dict) -> None:
     )[:7]:
         exception_rows.append(
             f"""
-            <div class="breakdown-row">
+            <div class="p2p-breakdown-row">
               <span>{h(label_exception(exception))}</span>
-              <span class="count-chip">{h(count)}</span>
+              <span class="p2p-count-chip">{h(count)}</span>
             </div>
             """
         )
     if not exception_rows:
-        exception_rows.append('<div class="empty-mini">No exceptions detected yet.</div>')
+        exception_rows.append('<div class="p2p-empty-mini">No exceptions detected yet.</div>')
 
     render_html(
         f"""
-        <div class="dashboard-grid">
-          <section class="panel" aria-label="Resolution outcomes">
-            <div class="panel-kicker">Resolution outcomes</div>
-            <div class="stacked-bar">{"".join(segments)}</div>
+        <div class="p2p-dashboard-grid">
+          <section class="p2p-panel" aria-label="Resolution outcomes">
+            <div class="p2p-panel-kicker">Resolution outcomes</div>
+            <div class="p2p-stacked-bar">{"".join(segments)}</div>
             {"".join(outcome_rows)}
           </section>
-          <section class="panel" aria-label="Exception breakdown">
-            <div class="panel-kicker">Exception breakdown</div>
+          <section class="p2p-panel" aria-label="Exception breakdown">
+            <div class="p2p-panel-kicker">Exception breakdown</div>
             {"".join(exception_rows)}
           </section>
         </div>
@@ -122,9 +122,9 @@ def render_recent_cases(cases: list[dict]) -> None:
         rows.append(
             f"""
             <tr>
-              <td class="case-link">{h(case.get("case_id", "Unknown"))}</td>
+              <td class="p2p-case-link">{h(case.get("case_id", "Unknown"))}</td>
               <td>{h(invoice.get("supplier_name", "Unknown supplier"))}</td>
-              <td class="money">{h(format_money(invoice.get("total", 0), invoice.get("currency", "")))}</td>
+              <td class="p2p-money">{h(format_money(invoice.get("total", 0), invoice.get("currency", "")))}</td>
               <td>{h(exception)}</td>
               <td>{status_pill(status.key, status.label)}</td>
               <td>{h(assigned)}</td>
@@ -134,14 +134,14 @@ def render_recent_cases(cases: list[dict]) -> None:
         )
     if not rows:
         rows.append(
-            '<tr><td colspan="7" class="empty-mini">Processed cases will appear here.</td></tr>'
+            '<tr><td colspan="7" class="p2p-empty-mini">Processed cases will appear here.</td></tr>'
         )
     render_html(
         f"""
-        <section class="panel" aria-label="Recent cases">
-          <div class="panel-kicker">Recent cases</div>
-          <div class="case-table-wrap">
-            <table class="case-table">
+        <section class="p2p-panel" aria-label="Recent cases">
+          <div class="p2p-panel-kicker">Recent cases</div>
+          <div class="p2p-case-table-wrap">
+            <table class="p2p-case-table">
               <colgroup><col style="width:17%"><col style="width:18%"><col style="width:15%"><col style="width:17%"><col style="width:15%"><col style="width:12%"><col style="width:6%"></colgroup>
               <thead><tr><th>Case ID</th><th>Vendor</th><th>Amount</th><th>Type</th><th>Status</th><th>Assigned</th><th>Age</th></tr></thead>
               <tbody>{"".join(rows)}</tbody>
@@ -152,7 +152,9 @@ def render_recent_cases(cases: list[dict]) -> None:
     )
 
 
-def render(app: CaseService) -> None:
+def render() -> None:
+    app = service()
+    top_bar(["Overview"], "/")
     page_header(
         "Operations center",
         "Autonomous P2P Exception Handler",
@@ -161,7 +163,7 @@ def render(app: CaseService) -> None:
     metrics = app.metrics()
     cases = app.list_cases()
     render_html(
-        '<div class="metric-grid">'
+        '<div class="p2p-metric-grid">'
         + metric_card("Invoices processed", metrics["total"], "All workflow runs", "receipt_long")
         + metric_card(
             "Auto-resolved",
@@ -186,28 +188,6 @@ def render(app: CaseService) -> None:
     )
     render_dashboard_analysis(metrics)
     render_recent_cases(cases)
-    render_html(
-        f"""
-        <div class="architecture-label">Control architecture</div>
-        <div class="architecture-grid">
-          <article class="panel">
-            <div class="architecture-icon">{icon("database")}</div>
-            <div class="decision-title">Evidence Engine</div>
-            <div class="decision-copy">Validated invoices, purchase orders, receipts, supplier records, and duplicate history establish the factual record.</div>
-            <div class="architecture-meta">Deterministic inputs</div>
-          </article>
-          <article class="panel">
-            <div class="architecture-icon">{icon("psychology")}</div>
-            <div class="decision-title">Reasoning Engine</div>
-            <div class="decision-copy">Investigation, resolution, and critique use typed outputs inside a bounded revision loop.</div>
-            <div class="architecture-meta">3 structured AI roles</div>
-          </article>
-          <article class="panel">
-            <div class="architecture-icon">{icon("gavel")}</div>
-            <div class="decision-title">Authority Framework</div>
-            <div class="decision-copy">Deterministic policy either finalizes the case or pauses the workflow for a human reviewer.</div>
-            <div class="architecture-meta">Human-in-the-loop controls</div>
-          </article>
-        </div>
-        """,
-    )
+
+
+render()

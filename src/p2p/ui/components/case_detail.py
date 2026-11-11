@@ -15,7 +15,7 @@ from p2p.ui.viewmodels import (
 def render_discrepancies(state: dict) -> None:
     result = state.get("match_result") or {}
     summary = result.get("summary", "Not yet available")
-    render_html(f'<div class="section-subtitle">{h(summary)}</div>')
+    render_html(f'<div class="p2p-section-subtitle">{h(summary)}</div>')
     discrepancies = result.get("discrepancies", [])
     if not discrepancies:
         st.success("No discrepancies — exact three-way match")
@@ -24,25 +24,25 @@ def render_discrepancies(state: dict) -> None:
         severity = str(item.get("severity", "info")).lower()
         render_html(
             f"""
-            <div class="discrepancy">
-              <div class="discrepancy-head">
-                <div class="discrepancy-type">{h(label_exception(item.get("type")))}</div>
-                <span class="severity-chip severity-{h(severity)}">{h(severity)}</span>
+            <div class="p2p-discrepancy">
+              <div class="p2p-discrepancy-head">
+                <div class="p2p-discrepancy-type">{h(label_exception(item.get("type")))}</div>
+                <span class="p2p-severity-chip p2p-severity-{h(severity)}">{h(severity)}</span>
               </div>
-              <div class="discrepancy-copy">{h(item.get("explanation", "No explanation provided."))}</div>
+              <div class="p2p-discrepancy-copy">{h(item.get("explanation", "No explanation provided."))}</div>
             </div>
             """,
         )
 
 
 def stage(title: str, detail: str, warning: bool = False) -> str:
-    warning_class = " warn" if warning else ""
+    warning_class = " p2p-warn" if warning else ""
     marker = icon("priority_high" if warning else "check")
     return f"""
-      <div class="stage">
-        <span class="stage-dot{warning_class}">{marker}</span>
-        <div class="stage-title">{h(title)}</div>
-        <div class="stage-detail">{h(detail)}</div>
+      <div class="p2p-stage">
+        <span class="p2p-stage-dot{warning_class}">{marker}</span>
+        <div class="p2p-stage-title">{h(title)}</div>
+        <div class="p2p-stage-detail">{h(detail)}</div>
       </div>
     """
 
@@ -57,19 +57,19 @@ def render_case(case: dict) -> None:
     status = display_status(case)
     render_html(
         f"""
-        <div class="case-hero">
-          <div class="case-kicker">Exception case</div>
-          <div class="case-title">{h(case["case_id"])}</div>
-          <div class="case-meta">
+        <div class="p2p-case-hero">
+          <div class="p2p-case-kicker">Exception case</div>
+          <div class="p2p-case-title">{h(case["case_id"])}</div>
+          <div class="p2p-case-meta">
             {status_pill(status.key, status.label)}
             <span>{h(invoice["supplier_name"])}</span><span>·</span><span>{h(invoice["invoice_id"])}</span>
           </div>
         </div>
-        <div class="case-summary-grid">
-          <div class="summary-card"><div class="summary-label">Invoice</div><div class="summary-value">{h(invoice["invoice_id"])}</div></div>
-          <div class="summary-card"><div class="summary-label">Supplier</div><div class="summary-value" title="{h(invoice["supplier_name"])}">{h(invoice["supplier_name"])}</div></div>
-          <div class="summary-card"><div class="summary-label">Purchase order</div><div class="summary-value">{h(invoice.get("po_number") or "Missing")}</div></div>
-          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(format_money(invoice["total"], invoice["currency"]))}</div></div>
+        <div class="p2p-case-summary-grid">
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice</div><div class="p2p-summary-value">{h(invoice["invoice_id"])}</div></div>
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Supplier</div><div class="p2p-summary-value" title="{h(invoice["supplier_name"])}">{h(invoice["supplier_name"])}</div></div>
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Purchase order</div><div class="p2p-summary-value">{h(invoice.get("po_number") or "Missing")}</div></div>
+          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice total</div><div class="p2p-summary-value">{h(format_money(invoice["total"], invoice["currency"]))}</div></div>
         </div>
         """,
     )
@@ -115,8 +115,8 @@ def render_case(case: dict) -> None:
                     not critique["valid"],
                 )
             )
-        render_html(f'<div class="timeline">{"".join(timeline)}</div>')
-        render_html('<div class="section-title">Match findings</div>')
+        render_html(f'<div class="p2p-timeline">{"".join(timeline)}</div>')
+        render_html('<div class="p2p-section-title">Match findings</div>')
         render_discrepancies(state)
         policy = state.get("policy_result")
         if policy:
@@ -126,8 +126,8 @@ def render_case(case: dict) -> None:
             )
             render_html(
                 f"""
-                <div class="guardrail">
-                  <div class="guardrail-mark">{icon("policy")}</div>
+                <div class="p2p-guardrail">
+                  <div class="p2p-guardrail-mark">{icon("policy")}</div>
                   <div><strong>Deterministic policy · {h(verdict)}</strong><ul>{reasons}</ul></div>
                 </div>
                 """,
@@ -144,11 +144,11 @@ def render_case(case: dict) -> None:
             missing = investigation["missing_information"]
             render_html(
                 f"""
-                <div class="decision-card">
-                  <div class="decision-label">AI interpretation · verify against evidence</div>
-                  <div class="decision-title">{h(investigation["root_cause"])}</div>
-                  <div class="decision-copy"><strong>Evidence</strong> · {h(evidence or "None cited")}</div>
-                  {f'<div class="decision-copy"><strong>Missing</strong> · {h("; ".join(missing))}</div>' if missing else ""}
+                <div class="p2p-decision-card">
+                  <div class="p2p-decision-label">AI interpretation · verify against evidence</div>
+                  <div class="p2p-decision-title">{h(investigation["root_cause"])}</div>
+                  <div class="p2p-decision-copy"><strong>Evidence</strong> · {h(evidence or "None cited")}</div>
+                  {f'<div class="p2p-decision-copy"><strong>Missing</strong> · {h("; ".join(missing))}</div>' if missing else ""}
                 </div>
                 """,
             )
@@ -157,11 +157,11 @@ def render_case(case: dict) -> None:
             request = resolution.get("information_request")
             render_html(
                 f"""
-                <div class="decision-card">
-                  <div class="decision-label">Proposed resolution</div>
-                  <div class="decision-title">{action_pill(resolution["action"])}</div>
-                  <div class="decision-copy">{h(resolution["rationale"])}</div>
-                  {f'<div class="request-copy">{h(request)}</div>' if request else ""}
+                <div class="p2p-decision-card">
+                  <div class="p2p-decision-label">Proposed resolution</div>
+                  <div class="p2p-decision-title">{action_pill(resolution["action"])}</div>
+                  <div class="p2p-decision-copy">{h(resolution["rationale"])}</div>
+                  {f'<div class="p2p-request-copy">{h(request)}</div>' if request else ""}
                 </div>
                 """,
             )
@@ -178,13 +178,13 @@ def render_case(case: dict) -> None:
             critique = state["critique"]
             verdict = "Valid" if critique["valid"] else "Revision required"
             issues = "".join(
-                f'<div class="decision-copy">• {h(issue)}</div>' for issue in critique["issues"]
+                f'<div class="p2p-decision-copy">• {h(issue)}</div>' for issue in critique["issues"]
             )
             render_html(
                 f"""
-                <div class="decision-card">
-                  <div class="decision-label">Reflexion</div>
-                  <div class="decision-title">{h(verdict)}</div>{issues}
+                <div class="p2p-decision-card">
+                  <div class="p2p-decision-label">Reflexion</div>
+                  <div class="p2p-decision-title">{h(verdict)}</div>{issues}
                 </div>
                 """,
             )
@@ -192,10 +192,10 @@ def render_case(case: dict) -> None:
             outcome = state["outcome"]
             render_html(
                 f"""
-                <div class="decision-card">
-                  <div class="decision-label">Final outcome · {h(outcome["source"].replace("_", " ").title())}</div>
-                  <div class="decision-title">{action_pill(outcome["action"])}</div>
-                  <div class="decision-copy">{h(outcome["rationale"])}</div>
+                <div class="p2p-decision-card">
+                  <div class="p2p-decision-label">Final outcome · {h(outcome["source"].replace("_", " ").title())}</div>
+                  <div class="p2p-decision-title">{action_pill(outcome["action"])}</div>
+                  <div class="p2p-decision-copy">{h(outcome["rationale"])}</div>
                 </div>
                 """,
             )
@@ -206,11 +206,11 @@ def render_case(case: dict) -> None:
         for event in audit:
             render_html(
                 f"""
-                <div class="audit-row">
-                  <div class="audit-node"></div>
+                <div class="p2p-audit-row">
+                  <div class="p2p-audit-node"></div>
                   <div>
-                    <div class="audit-title">{h(label_event(event["event_type"]))}</div>
-                    <div class="audit-meta">{h(event["timestamp"])} · {h(event["actor"])}</div>
+                    <div class="p2p-audit-title">{h(label_event(event["event_type"]))}</div>
+                    <div class="p2p-audit-meta">{h(event["timestamp"])} · {h(event["actor"])}</div>
                   </div>
                 </div>
                 """,

@@ -1,27 +1,54 @@
 from __future__ import annotations
 
+from functools import cache
 from pathlib import Path
+from urllib.parse import urlencode
 
 import streamlit as st
 
-from p2p.ui.components.chips import h, render_html
+from p2p.ui.components.chips import h, icon, render_html
 from p2p.ui.identity import current_reviewer, initials
+from p2p.ui.runtime import service
 
 STYLES_PATH = Path(__file__).resolve().parents[1] / "styles.css"
 
 
+@cache
+def _styles() -> str:
+    return STYLES_PATH.read_text(encoding="utf-8")
+
+
 def load_styles() -> None:
-    render_html(f"<style>{STYLES_PATH.read_text(encoding='utf-8')}</style>")
+    render_html(f"<style>{_styles()}</style>")
 
 
-def top_bar(page: str) -> None:
+def switch_to(page: str, **query_params: str) -> None:
+    """Open a registered page; call from the script body, not from a widget callback."""
+    st.switch_page(st.session_state["p2p_pages"][page], query_params=query_params or None)
+
+
+def top_bar(crumbs: list[str], path: str) -> None:
+    separator = f'<span class="p2p-crumb-sep">{icon("chevron_right")}</span>'
+    trail = separator.join(
+        f'<span class="p2p-crumb{" p2p-crumb-current" if index == len(crumbs) - 1 else ""}">'
+        f"{h(crumb)}</span>"
+        for index, crumb in enumerate(crumbs)
+    )
+    query = urlencode(st.query_params.to_dict())
+    location = f"{path}?{query}" if query else path
+    mode = "Demo" if service().runtime.demo_mode else "Live"
+    waiting = st.session_state.get("p2p_pending_review", 0)
     reviewer = current_reviewer()
     render_html(
         f"""
-        <div class="topbar">
-          <div class="breadcrumb">Operations / <strong>{h(page)}</strong></div>
-          <div class="topbar-right">
-            <span class="operator-avatar" title="{h(reviewer)}" aria-label="Reviewer {h(reviewer)}">{h(initials(reviewer))}</span>
+        <div class="p2p-topbar">
+          <div class="p2p-topbar-left">
+            <nav class="p2p-breadcrumb" aria-label="Breadcrumb">{trail}</nav>
+            <span class="p2p-location">{icon("link")}{h(location)}</span>
+          </div>
+          <div class="p2p-topbar-right">
+            <span class="p2p-mode-pill"><i></i>{h(mode)} mode · {waiting} awaiting review</span>
+            <span class="p2p-avatar" title="Signed in as {h(reviewer)}">{h(initials(reviewer))}</span>
           </div>
         </div>
         """,
@@ -31,9 +58,9 @@ def top_bar(page: str) -> None:
 def page_header(eyebrow: str, title: str, description: str) -> None:
     render_html(
         f"""
-        <div class="page-header">
+        <div class="p2p-page-header">
           <div>
-            <div class="eyebrow">{h(eyebrow)}</div>
+            <div class="p2p-eyebrow">{h(eyebrow)}</div>
             <h1>{h(title)}</h1>
             <p>{h(description)}</p>
           </div>
@@ -55,16 +82,10 @@ def render_flash() -> None:
 def render_field_errors(rows: list[tuple[str, str]]) -> None:
     st.error(f"{len(rows)} field(s) need fixing before this invoice can be processed")
     items = "".join(f"<code>{h(field)}</code><span>{h(message)}</span>" for field, message in rows)
-    render_html(f'<div class="field-errors">{items}</div>')
+    render_html(f'<div class="p2p-field-errors">{items}</div>')
 
 
 def show_failure(message: str, exc: Exception) -> None:
     st.error(message)
     with st.expander("Technical details"):
         st.code(f"{type(exc).__name__}: {exc}", language=None)
-
-
-def navigate_to_page(page: str) -> None:
-    st.session_state["active_page"] = page
-    st.session_state["desktop_navigation"] = page
-    st.session_state["mobile_navigation"] = page

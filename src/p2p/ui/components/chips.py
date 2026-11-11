@@ -21,7 +21,7 @@ def icon(name: str) -> str:
 
 def status_pill(key: str, label: str) -> str:
     css_key = key.replace("_", "-")
-    return f'<span class="status-pill status-{h(css_key)}">{h(label)}</span>'
+    return f'<span class="p2p-status-pill p2p-status-{h(css_key)}">{h(label)}</span>'
 
 
 def action_pill(action: str) -> str:
