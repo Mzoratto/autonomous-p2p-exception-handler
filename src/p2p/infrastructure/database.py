@@ -227,33 +227,39 @@ class Database:
                     text(f"CREATE INDEX IF NOT EXISTS ix_cases_{name} ON cases ({name})")
                 )
         with self.session_factory() as session:
-            rows = session.scalars(select(CaseRow).where(CaseRow.created_at.is_(None))).all()
-            for row in rows:
+            case_ids = session.scalars(
+                select(CaseRow.case_id).where(CaseRow.created_at.is_(None))
+            ).all()
+            for case_id in case_ids:
+                # One commit per row: a value SQLite rejects rolls back only that row.
                 try:
-                    state = json.loads(row.state_payload)
-                    facts = project(json.loads(row.invoice_payload), state)
-                    completed = (state.get("outcome") or {}).get("completed_at")
-                    completed_at = _naive_utc(completed) if completed else None
+                    self._backfill(session, session.get(CaseRow, case_id))
+                    session.commit()
                 except Exception as exc:
+                    session.rollback()
+                    row = session.get(CaseRow, case_id)
                     row.created_at = row.updated_at
                     row.last_error = f"Migration could not read stored state: {type(exc).__name__}"
-                    continue
-                for key, value in facts.items():
-                    setattr(row, key, value)
-                first_event = session.scalar(
-                    select(func.min(AuditEventRow.timestamp)).where(
-                        AuditEventRow.case_id == row.case_id
-                    )
-                )
-                row.created_at = first_event or row.updated_at
-                row.review_requested_at = session.scalar(
-                    select(func.max(AuditEventRow.timestamp)).where(
-                        AuditEventRow.case_id == row.case_id,
-                        AuditEventRow.event_type == AuditEventType.HUMAN_REVIEW_REQUESTED.value,
-                    )
-                )
-                row.completed_at = completed_at
-            session.commit()
+                    session.commit()
+
+    @staticmethod
+    def _backfill(session, row: CaseRow) -> None:
+        state = json.loads(row.state_payload)
+        for key, value in project(json.loads(row.invoice_payload), state).items():
+            setattr(row, key, value)
+        first_event = session.scalar(
+            select(func.min(AuditEventRow.timestamp)).where(AuditEventRow.case_id == row.case_id)
+        )
+        row.created_at = first_event or row.updated_at
+        row.review_requested_at = session.scalar(
+            select(func.max(AuditEventRow.timestamp)).where(
+                AuditEventRow.case_id == row.case_id,
+                AuditEventRow.event_type == AuditEventType.HUMAN_REVIEW_REQUESTED.value,
+            )
+        )
+        completed = (state.get("outcome") or {}).get("completed_at")
+        row.completed_at = _naive_utc(completed) if completed else None
+        session.flush()
 
 
 class SqliteRepository:

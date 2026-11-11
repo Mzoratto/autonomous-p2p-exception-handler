@@ -114,18 +114,28 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         database_url=f"sqlite:///{source}", demo_mode=True, checkpointer=InMemorySaver()
     )
     cases = process(
-        CaseService(runtime), "01_exact_match", "02_small_price_variance", "03_large_price_variance"
+        CaseService(runtime),
+        "01_exact_match",
+        "02_small_price_variance",
+        "03_large_price_variance",
+        "04_quantity_variance",
     )
-    valid, oversized, broken = cases.values()
+    valid, oversized, broken, non_scalar = cases.values()
     runtime.close()
     legacy = tmp_path / "legacy.db"
-    legacy_copy(source, legacy, [valid, oversized, broken], corrupt={broken})
+    legacy_copy(source, legacy, list(cases.values()), corrupt={broken})
     with sqlite3.connect(legacy) as connection:
         # Valid JSON whose total in cents exceeds SQLite's signed 64-bit INTEGER.
         connection.execute(
             "UPDATE cases SET invoice_payload = json_set(invoice_payload, '$.total', "
             "'92233720368547758.08') WHERE case_id = ?",
             (oversized,),
+        )
+        # Valid JSON whose supplier name is a list, which SQLite cannot bind.
+        connection.execute(
+            "UPDATE cases SET invoice_payload = json_set(invoice_payload, '$.supplier_name', "
+            "json('[]')) WHERE case_id = ?",
+            (non_scalar,),
         )
 
     database = Database(f"sqlite:///{legacy}")
@@ -139,6 +149,9 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         row = session.get(CaseRow, oversized)
         assert row.last_error == "Migration could not read stored state: ValueError"
         assert (row.supplier_name, row.total_cents) == (None, None)
+        row = session.get(CaseRow, non_scalar)
+        assert row.last_error == "Migration could not read stored state: ProgrammingError"
+        assert (row.supplier_name, row.total_cents, row.created_at) == (None, None, row.updated_at)
         assert session.get(CaseRow, valid).supplier_name == "Acme Components"
     database.engine.dispose()
 
@@ -155,6 +168,7 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         valid: "Approved · Autonomous",
         oversized: "Needs recovery",
         broken: "Needs recovery",
+        non_scalar: "Needs recovery",
     }
 
 
