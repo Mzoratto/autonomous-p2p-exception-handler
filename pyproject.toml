@@ -16,7 +16,7 @@ dependencies = [
   "python-dotenv>=1.0,<2",
   "PyYAML>=6.0,<7",
   "SQLAlchemy>=2.0,<3",
-  "streamlit>=1.40,<2",
+  "streamlit>=1.67,<2",
 ]
 
 [project.optional-dependencies]
