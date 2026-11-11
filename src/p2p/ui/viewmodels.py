@@ -766,6 +766,19 @@ SOURCE_LABELS = {
 }
 
 
+def waiting_labels(waiting: list[dict]) -> list[str]:
+    """Chart labels: the invoice id, plus the case id when two waiting cases share an invoice id."""
+    counts: dict[str, int] = {}
+    for item in waiting:
+        counts[item["invoice_id"]] = counts.get(item["invoice_id"], 0) + 1
+    return [
+        item["invoice_id"]
+        if counts[item["invoice_id"]] == 1
+        else f"{item['invoice_id']} · {item['case_id']}"
+        for item in waiting
+    ]
+
+
 def outcome_view(case: dict) -> list[tuple[str, str]]:
     state = case.get("state") or {}
     outcome = state.get("outcome")

@@ -229,6 +229,7 @@
 .p2p-queue-wait { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
 .p2p-queue-wait .p2p-icon { font-size: 15px; }
 .p2p-queue-late { color: var(--sev-critical-fg); font-weight: 600; }
+.p2p-queue-recovery { align-self: flex-start; padding: 1px 8px; border-radius: var(--radius-chip); background: var(--status-review-bg); color: var(--status-review-fg); font-size: 12px; font-weight: 600; }
 .p2p-panel-title { margin: 0; padding: 0; font-size: 16px; font-weight: 600; color: var(--ink); }
 .p2p-recommendation { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--surface-subtle); }
 .p2p-recommendation-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

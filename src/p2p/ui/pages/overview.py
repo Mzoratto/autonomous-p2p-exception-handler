@@ -16,6 +16,7 @@ from p2p.ui.viewmodels import (
     local_zone,
     parse_timestamp,
     severity_chip,
+    waiting_labels,
 )
 
 SEVERITY_BARS = {
@@ -203,12 +204,15 @@ def waiting_chart(summary: dict) -> None:
         data = pd.DataFrame(
             [
                 {
+                    "case": label,
                     "invoice": item["invoice_id"],
                     "hours": round(item["wait_seconds"] / 3600, 2),
                     "waited": format_duration(item["wait_seconds"]),
                     "severity": item["max_severity"] or "INFO",
                 }
-                for item in summary["waiting"]
+                for item, label in zip(
+                    summary["waiting"], waiting_labels(summary["waiting"]), strict=True
+                )
             ]
         )
         bars = (
@@ -216,7 +220,7 @@ def waiting_chart(summary: dict) -> None:
             .mark_bar(cornerRadius=3, height=18)
             .encode(
                 y=alt.Y(
-                    "invoice:N", sort=alt.EncodingSortField("hours", order="descending"), title=None
+                    "case:N", sort=alt.EncodingSortField("hours", order="descending"), title=None
                 ),
                 x=alt.X("hours:Q", title="Hours waiting", scale=alt.Scale(domainMin=0)),
                 color=alt.Color(

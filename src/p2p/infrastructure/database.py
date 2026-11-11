@@ -427,7 +427,8 @@ class SqliteRepository:
                 for key, value in facts.items():
                     if getattr(row, key) != value:
                         setattr(row, key, value)
-                if status_changed and row.last_error is not None:
+                # A successful save means reconciliation worked; drop any recorded failure.
+                if row.last_error is not None:
                     row.last_error = None
             if status == "PENDING_REVIEW" and row.review_requested_at is None:
                 row.review_requested_at = _utcnow()

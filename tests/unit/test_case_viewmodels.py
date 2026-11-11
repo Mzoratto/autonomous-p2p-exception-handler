@@ -19,6 +19,7 @@ from p2p.ui.viewmodels import (
     policy_view,
     tab_labels,
     timeline,
+    waiting_labels,
 )
 
 UTC_ZONE = (UTC, " UTC")
@@ -176,3 +177,13 @@ def test_unknown_browser_zone_falls_back_to_utc():
     assert local_zone("Not/AZone") == UTC_ZONE
     assert local_zone(None) == UTC_ZONE
     assert local_zone("Europe/Prague")[1] == ""
+
+
+def test_waiting_labels_keep_cases_with_the_same_invoice_id_apart():
+    waiting = [
+        {"case_id": "CASE-A", "invoice_id": "INV-1"},
+        {"case_id": "CASE-B", "invoice_id": "INV-1"},
+        {"case_id": "CASE-C", "invoice_id": "INV-2"},
+    ]
+
+    assert waiting_labels(waiting) == ["INV-1 · CASE-A", "INV-1 · CASE-B", "INV-2"]

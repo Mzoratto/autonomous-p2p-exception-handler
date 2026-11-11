@@ -7,7 +7,7 @@ import streamlit as st
 from p2p.domain.models import DecisionType, HumanReview
 from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import action_pill, h, icon, render_html
-from p2p.ui.components.shell import switch_to, top_bar
+from p2p.ui.components.shell import show_failure, switch_to, top_bar
 from p2p.ui.identity import current_reviewer, initials
 from p2p.ui.runtime import service
 from p2p.ui.viewmodels import (
@@ -27,7 +27,6 @@ DECISION_CAPTIONS = {
 }
 NOTE_REQUIRED = {DecisionType.APPROVE, DecisionType.REJECT}
 MIN_NOTE = 3
-DAY = 24 * 3600
 
 
 def select_case(case_id: str) -> None:
@@ -49,16 +48,18 @@ def waited_seconds(row: dict, now: datetime) -> float:
     return max(0.0, (now - since).total_seconds())
 
 
-def queue_card(row: dict, now: datetime, selected: bool) -> None:
+def queue_card(row: dict, now: datetime, selected: bool, late_after: float) -> None:
     chip = severity_chip(row["max_severity"])
     waited = waited_seconds(row, now)
-    late = " p2p-queue-late" if waited > DAY else ""
+    late = " p2p-queue-late" if waited > late_after else ""
+    recovery = '<span class="p2p-queue-recovery">Needs recovery</span>' if row["last_error"] else ""
     with st.container(key=f"queue-card-{row['case_id']}"):
         render_html(
             f"""
             <div class="p2p-queue-card{" p2p-queue-selected" if selected else ""}">
               <div class="p2p-queue-top"><strong>{h(row["supplier_name"])}</strong><span>{h(format_money(row["total"], row["currency"]))}</span></div>
               <span class="p2p-muted">{h(label_exception(row["primary_exception"]))}</span>
+              {recovery}
               <div class="p2p-queue-bottom">
                 <span class="p2p-severity-chip p2p-severity-{h(chip.key)}">{h(chip.text)}</span>
                 <span class="p2p-queue-wait{late}">{icon("schedule")}{h(format_duration(waited))}</span>
@@ -266,13 +267,15 @@ def render() -> None:
     if selected_id not in by_id:
         selected_id = pending[0]["case_id"]
     st.query_params["case"] = selected_id
-    case = app.get_case(selected_id)
-    if case is None:
-        st.error(f"Case {selected_id} was not found.")
-        return
+    late_after = app.runtime.rules.review.sla_hours * 3600
+    case, failure = None, None
+    try:
+        case = app.get_case(selected_id)
+    except ValueError as exc:
+        failure = exc
 
-    top_bar(["Review queue", case["invoice_id"]], "/review")
-    if st.session_state.get("review_confirm", {}).get("case_id") == selected_id:
+    top_bar(["Review queue", by_id[selected_id]["invoice_id"]], "/review")
+    if case and st.session_state.get("review_confirm", {}).get("case_id") == selected_id:
         confirm_dialog(case, app)
 
     with st.container(horizontal=True, wrap=True, gap="medium", key="review-workbench"):
@@ -284,11 +287,20 @@ def render() -> None:
                 """
             )
             for item in pending:
-                queue_card(item, now, item["case_id"] == selected_id)
+                queue_card(item, now, item["case_id"] == selected_id, late_after)
         with st.container(width="stretch", key="review-case"):
-            render_case_detail(case, app)
-        with st.container(width=300, border=True, key="review-decision"):
-            decision_panel(case, app)
+            if failure is not None:
+                show_failure(
+                    f"{selected_id} needs recovery and cannot be reviewed until it is restored.",
+                    failure,
+                )
+            elif case is None:
+                st.error(f"Case {selected_id} was not found.")
+            else:
+                render_case_detail(case, app)
+        if case is not None:
+            with st.container(width=300, border=True, key="review-decision"):
+                decision_panel(case, app)
 
 
 render()

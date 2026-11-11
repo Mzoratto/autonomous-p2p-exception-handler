@@ -220,8 +220,9 @@ def test_summary_waits_and_trends_follow_the_clock(app):
     ]
 
 
-def test_case_with_a_missing_checkpoint_is_flagged_without_breaking_reads(app):
+def test_case_with_a_missing_checkpoint_is_flagged_and_cleared_once_restored(app):
     case_id = process(app, "03_large_price_variance")["03_large_price_variance"]
+    checkpointer = app.runtime.graph.checkpointer
     app.runtime.graph.checkpointer = InMemorySaver()
 
     app.refresh_open_cases()
@@ -232,6 +233,13 @@ def test_case_with_a_missing_checkpoint_is_flagged_without_breaking_reads(app):
     assert "checkpoint is missing" in row["last_error"]
     assert row["status"] == "PENDING_REVIEW"
     assert display_status(row).label == "Needs recovery"
+
+    app.runtime.graph.checkpointer = checkpointer
+    app.refresh_open_cases()
+
+    [row], _ = app.runtime.repository.query_cases()
+    assert row["last_error"] is None
+    assert display_status(row).label == "Awaiting review"
 
 
 def test_reconciling_an_unchanged_case_writes_nothing(app):

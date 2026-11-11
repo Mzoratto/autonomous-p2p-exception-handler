@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,38 @@ def open_page(page: str, **query_params: str) -> AppTest:
     if page != "overview":
         at.switch_page(f"src/p2p/ui/pages/{page}.py").run()
     return at
+
+
+def drop_checkpoint(database_url: str, case_id: str) -> None:
+    with sqlite3.connect(database_url.removeprefix("sqlite:///")) as connection:
+        for table in ("checkpoints", "writes"):
+            connection.execute(f"DELETE FROM {table} WHERE thread_id = ?", (case_id,))
+
+
+def test_review_queue_stays_usable_when_a_case_lost_its_checkpoint(database_url):
+    broken, healthy = process(database_url, "03_large_price_variance", "06_missing_po")
+    drop_checkpoint(database_url, broken)
+
+    at = open_page("review", case=broken)
+
+    assert not at.exception
+    assert any(f"{broken} needs recovery" in error.value for error in at.error)
+    queue = {button.key for button in at.button if button.key.startswith("queue_open_")}
+    assert queue == {f"queue_open_{broken}", f"queue_open_{healthy}"}
+    assert not any(radio.key.startswith("review_decision_") for radio in at.radio)
+
+    at.button(key=f"queue_open_{healthy}").click().run()
+    assert f"review_decision_{healthy}" in {radio.key for radio in at.radio}
+
+
+def test_case_detail_reports_a_case_that_lost_its_checkpoint(database_url):
+    [broken] = process(database_url, "03_large_price_variance")
+    drop_checkpoint(database_url, broken)
+
+    at = open_page("cases", case=broken)
+
+    assert not at.exception
+    assert any(f"{broken} needs recovery" in error.value for error in at.error)
 
 
 @pytest.mark.parametrize("page", PAGES)

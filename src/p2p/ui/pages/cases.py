@@ -6,7 +6,7 @@ from pandas.io.formats.style import Styler
 
 from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import h, render_html, status_pill
-from p2p.ui.components.shell import page_header, switch_to, top_bar
+from p2p.ui.components.shell import page_header, show_failure, switch_to, top_bar
 from p2p.ui.runtime import service
 from p2p.ui.viewmodels import display_status, label_exception, outcome_view, parse_timestamp
 
@@ -169,7 +169,11 @@ def case_detail(case_id: str) -> None:
     app = service()
     top_bar(["Cases", case_id], "/cases")
     st.button("All cases", icon=":material/arrow_back:", key="cases_back", on_click=show_all_cases)
-    case = app.get_case(case_id)
+    try:
+        case = app.get_case(case_id)
+    except ValueError as exc:
+        show_failure(f"{case_id} needs recovery and cannot be shown until it is restored.", exc)
+        return
     if not case:
         st.error(f"Case {case_id} was not found.")
         return
