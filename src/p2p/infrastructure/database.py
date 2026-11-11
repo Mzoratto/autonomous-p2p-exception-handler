@@ -11,9 +11,23 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import Boolean, DateTime, String, Text, create_engine, select
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    func,
+    inspect,
+    or_,
+    select,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from p2p.domain.casefacts import project
 from p2p.domain.models import (
     AuditEvent,
     AuditEventType,
@@ -73,6 +87,75 @@ class CaseRow(Base):
     invoice_payload: Mapped[str] = mapped_column(Text)
     state_payload: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    # Queryable projection of the payloads; see p2p.domain.casefacts.project.
+    supplier_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    supplier_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    po_number: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    primary_exception: Mapped[str | None] = mapped_column(String, nullable=True)
+    max_severity: Mapped[str | None] = mapped_column(String, nullable=True)
+    severity_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ai_action: Mapped[str | None] = mapped_column(String, nullable=True)
+    ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outcome_action: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    outcome_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
+    review_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+PROJECTED_COLUMNS = (
+    "supplier_id",
+    "supplier_name",
+    "po_number",
+    "currency",
+    "total_cents",
+    "primary_exception",
+    "max_severity",
+    "severity_rank",
+    "ai_action",
+    "ai_confidence",
+    "outcome_action",
+    "outcome_source",
+)
+INDEXED_COLUMNS = ("supplier_id", "po_number", "outcome_action", "created_at")
+MAX_ERROR_LENGTH = 500
+
+
+def _naive_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.replace(tzinfo=UTC).isoformat() if value else None
+
+
+def _completed_with(action: str) -> tuple:
+    return (CaseRow.status == "COMPLETED", CaseRow.outcome_action == action)
+
+
+CASE_VIEWS = {
+    "all": (),
+    "review": (CaseRow.status == "PENDING_REVIEW",),
+    "approved": _completed_with("APPROVE"),
+    "rejected": _completed_with("REJECT"),
+    "request_info": _completed_with("REQUEST_INFO"),
+}
+CASE_SORTS = {
+    "case": CaseRow.case_id,
+    "supplier": CaseRow.supplier_name,
+    "amount": CaseRow.total_cents,
+    "exception": CaseRow.severity_rank,
+    "confidence": CaseRow.ai_confidence,
+    "status": CaseRow.status,
+    "updated": CaseRow.updated_at,
+    "priority": None,
+}
 
 
 class CaseCommandRow(Base):
@@ -123,6 +206,45 @@ class Database:
 
     def create_all(self) -> None:
         Base.metadata.create_all(self.engine)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add the projected case columns to older databases and backfill them once.
+
+        Idempotent: columns and indexes are only added when missing, and only rows without
+        `created_at` are backfilled.
+        """
+        existing = {column["name"] for column in inspect(self.engine).get_columns("cases")}
+        with self.engine.begin() as connection:
+            for column in CaseRow.__table__.columns:
+                if column.name not in existing:
+                    kind = column.type.compile(dialect=self.engine.dialect)
+                    connection.execute(text(f"ALTER TABLE cases ADD COLUMN {column.name} {kind}"))
+            for name in INDEXED_COLUMNS:
+                connection.execute(
+                    text(f"CREATE INDEX IF NOT EXISTS ix_cases_{name} ON cases ({name})")
+                )
+        with self.session_factory() as session:
+            rows = session.scalars(select(CaseRow).where(CaseRow.created_at.is_(None))).all()
+            for row in rows:
+                state = json.loads(row.state_payload)
+                for key, value in project(json.loads(row.invoice_payload), state).items():
+                    setattr(row, key, value)
+                first_event = session.scalar(
+                    select(func.min(AuditEventRow.timestamp)).where(
+                        AuditEventRow.case_id == row.case_id
+                    )
+                )
+                row.created_at = first_event or row.updated_at
+                row.review_requested_at = session.scalar(
+                    select(func.max(AuditEventRow.timestamp)).where(
+                        AuditEventRow.case_id == row.case_id,
+                        AuditEventRow.event_type == AuditEventType.HUMAN_REVIEW_REQUESTED.value,
+                    )
+                )
+                completed = (state.get("outcome") or {}).get("completed_at")
+                row.completed_at = _naive_utc(completed) if completed else None
+            session.commit()
 
 
 class SqliteRepository:
@@ -187,6 +309,8 @@ class SqliteRepository:
                     status="PROCESSING",
                     invoice_payload=invoice.model_dump_json(),
                     state_payload="{}",
+                    created_at=_utcnow(),
+                    **project(json.loads(payload), {}),
                 )
             )
             session.commit()
@@ -275,6 +399,9 @@ class SqliteRepository:
             return [InvoiceSummary.model_validate_json(row.payload) for row in rows]
 
     def save_case(self, case_id: str, invoice: Invoice, status: str, state: dict) -> None:
+        payload = to_json(state)
+        snapshot = json.loads(payload)
+        facts = project(json.loads(invoice.model_dump_json()), snapshot)
         with self.database.session_factory() as session:
             row = session.get(CaseRow, case_id)
             if row is None:
@@ -283,21 +410,33 @@ class SqliteRepository:
                     invoice_id=invoice.invoice_id,
                     status=status,
                     invoice_payload=invoice.model_dump_json(),
-                    state_payload=to_json(state),
+                    state_payload=payload,
+                    created_at=_utcnow(),
+                    **facts,
                 )
                 session.add(row)
             else:
                 if to_json(Invoice.model_validate_json(row.invoice_payload)) != to_json(invoice):
                     raise ValueError("Case invoice content is immutable")
-                payload = to_json(state)
-                if row.status != status or row.state_payload != payload:
+                status_changed = row.status != status
+                if status_changed or row.state_payload != payload:
                     row.status = status
                     row.state_payload = payload
                     row.updated_at = _utcnow()
+                # Assign only what differs, so reconciling an unchanged case writes nothing.
+                for key, value in facts.items():
+                    if getattr(row, key) != value:
+                        setattr(row, key, value)
+                if status_changed and row.last_error is not None:
+                    row.last_error = None
+            if status == "PENDING_REVIEW" and row.review_requested_at is None:
+                row.review_requested_at = _utcnow()
             if status == "COMPLETED":
                 outcome = state.get("outcome")
                 if not outcome:
                     raise ValueError("Completed case requires a validated outcome")
+                if row.completed_at is None:
+                    row.completed_at = _naive_utc(snapshot["outcome"]["completed_at"])
                 for event_type, data in [
                     (AuditEventType.HUMAN_DECISION_RECEIVED, state.get("human_review")),
                     (AuditEventType.CASE_COMPLETED, outcome),
@@ -332,6 +471,99 @@ class SqliteRepository:
                 statement = statement.where(CaseRow.status == status)
             return [self._case_dict(row) for row in session.scalars(statement).all()]
 
+    def open_case_ids(self) -> list[str]:
+        with self.database.session_factory() as session:
+            return list(
+                session.scalars(select(CaseRow.case_id).where(CaseRow.status != "COMPLETED"))
+            )
+
+    def query_cases(
+        self,
+        view: str = "all",
+        search: str = "",
+        sort: str = "updated",
+        descending: bool = True,
+        limit: int | None = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """List case rows from the projected columns only; payloads are never parsed."""
+        if view not in CASE_VIEWS:
+            raise ValueError(f"Unknown case view: {view}")
+        if sort not in CASE_SORTS:
+            raise ValueError(f"Unknown case sort: {sort}")
+        statement = select(CaseRow).where(*CASE_VIEWS[view])
+        term = search.strip().lower()
+        if term:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            statement = statement.where(
+                or_(
+                    *(
+                        func.lower(column).like(pattern, escape="\\")
+                        for column in (
+                            CaseRow.case_id,
+                            CaseRow.invoice_id,
+                            CaseRow.supplier_name,
+                            CaseRow.po_number,
+                        )
+                    )
+                )
+            )
+        if sort == "priority":
+            order = [
+                CaseRow.severity_rank.desc(),
+                CaseRow.total_cents.desc(),
+                CaseRow.review_requested_at.asc(),
+            ]
+        else:
+            column = CASE_SORTS[sort]
+            order = [column.desc() if descending else column.asc()]
+        statement = statement.order_by(*order, CaseRow.case_id)
+        with self.database.session_factory() as session:
+            total = session.scalar(select(func.count()).select_from(statement.subquery()))
+            if limit is not None:
+                statement = statement.limit(limit).offset(offset)
+            return [self._row_dict(row) for row in session.scalars(statement)], total
+
+    def view_counts(self) -> dict[str, int]:
+        with self.database.session_factory() as session:
+            return {
+                view: session.scalar(select(func.count(CaseRow.case_id)).where(*conditions))
+                for view, conditions in CASE_VIEWS.items()
+            }
+
+    def record_error(self, case_id: str, message: str) -> None:
+        """Store the last failure for a case without touching its status."""
+        message = message[:MAX_ERROR_LENGTH]
+        with self.database.session_factory() as session:
+            row = session.get(CaseRow, case_id)
+            if row is not None and row.last_error != message:
+                row.last_error = message
+                session.commit()
+
+    @staticmethod
+    def _row_dict(row: CaseRow) -> dict:
+        return {
+            "case_id": row.case_id,
+            "invoice_id": row.invoice_id,
+            "supplier_name": row.supplier_name,
+            "po_number": row.po_number,
+            "currency": row.currency,
+            "total": None if row.total_cents is None else f"{Decimal(row.total_cents) / 100:.2f}",
+            "primary_exception": row.primary_exception,
+            "max_severity": row.max_severity,
+            "ai_action": row.ai_action,
+            "ai_confidence": row.ai_confidence,
+            "status": row.status,
+            "outcome_action": row.outcome_action,
+            "outcome_source": row.outcome_source,
+            "last_error": row.last_error,
+            "created_at": _iso(row.created_at),
+            "review_requested_at": _iso(row.review_requested_at),
+            "completed_at": _iso(row.completed_at),
+            "updated_at": _iso(row.updated_at),
+        }
+
     @staticmethod
     def _case_dict(row: CaseRow) -> dict:
         return {
@@ -341,6 +573,7 @@ class SqliteRepository:
             "invoice": json.loads(row.invoice_payload),
             "state": json.loads(row.state_payload),
             "updated_at": row.updated_at.replace(tzinfo=UTC).isoformat(),
+            "last_error": row.last_error,
         }
 
     def record(self, event: AuditEvent) -> None:

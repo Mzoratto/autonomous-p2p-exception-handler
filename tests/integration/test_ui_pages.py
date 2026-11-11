@@ -51,11 +51,61 @@ def test_page_renders_with_completed_pending_and_rejected_cases(database_url, pa
     assert not open_page(page).exception
 
 
-def test_case_query_param_selects_the_case(database_url):
+def html(at: AppTest) -> str:
+    return "".join(element.proto.body for element in at.get("html"))
+
+
+def test_case_query_param_opens_the_case_detail(database_url):
     case_ids = process(database_url, "01_exact_match", "08_duplicate_invoice")
 
     for case_id in case_ids:
-        assert open_page("cases", case=case_id).selectbox(key="cases_case").value == case_id
+        at = open_page("cases", case=case_id)
+        assert not at.exception
+        assert f'<span class="p2p-case-id">{case_id}</span>' in html(at)
+
+
+def test_unknown_case_query_param_reports_it(database_url):
+    at = open_page("cases", case="CASE-NOPE")
+
+    assert [error.value for error in at.error] == ["Case CASE-NOPE was not found."]
+
+
+def test_status_query_param_filters_the_case_table(database_url):
+    rejected = process(
+        database_url, "01_exact_match", "03_large_price_variance", "08_duplicate_invoice"
+    )[2]
+
+    at = open_page("cases", status="rejected")
+
+    assert at.pills(key="cases_view").value == "rejected"
+    assert list(at.dataframe[0].value["Case"]) == [rejected]
+
+
+def test_overview_shows_queue_value_and_auto_resolution(database_url):
+    process(
+        database_url,
+        "01_exact_match",
+        "03_large_price_variance",
+        "08_duplicate_invoice",
+        "10_ambiguous_high_value",
+    )
+
+    body = html(open_page("overview"))
+
+    assert "€62,200.00" in body
+    assert "2 of 4 without a reviewer" in body
+    assert "0 of 0 AI-recommended decisions were changed" in body
+
+
+def test_running_all_scenarios_from_an_empty_overview(database_url):
+    at = open_page("overview")
+
+    at.button(key="overview_run_all_empty").click().run()
+
+    assert not at.exception
+    assert at.toast[0].value == "10 scenarios processed · 7 need review"
+    at.button(key="overview_run_all_top").click().run()
+    assert at.toast[0].value == "Demo scenarios were already processed · 7 awaiting review"
 
 
 def test_review_query_param_selects_a_pending_case(database_url):

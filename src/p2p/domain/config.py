@@ -41,6 +41,10 @@ class ReflectionRules(BaseModel):
     max_iterations: int = Field(default=3, ge=1, le=10)
 
 
+class ReviewRules(BaseModel):
+    sla_hours: int = Field(default=24, ge=1, le=720)
+
+
 class BusinessRules(BaseModel):
     price_variance: PriceVarianceRules
     quantity_variance: QuantityVarianceRules
@@ -50,6 +54,7 @@ class BusinessRules(BaseModel):
     missing_po: MissingPORules
     missing_receipt: MissingReceiptRules
     reflection: ReflectionRules
+    review: ReviewRules = Field(default_factory=ReviewRules)
 
     @classmethod
     def load(cls, path: str | Path) -> BusinessRules:

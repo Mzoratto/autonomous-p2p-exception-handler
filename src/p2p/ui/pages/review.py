@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 import streamlit as st
 
-from p2p.domain.casefacts import SEVERITY_RANK, primary_exception
 from p2p.domain.models import DecisionType, HumanReview
 from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import action_pill, h, icon, render_html
@@ -31,17 +30,6 @@ MIN_NOTE = 3
 DAY = 24 * 3600
 
 
-def queue(cases: list[dict], now: datetime) -> list[dict]:
-    """Pending cases by severity, then invoice value, then time waiting (all descending)."""
-
-    def priority(case: dict) -> tuple:
-        _, severity, _ = primary_exception(case["state"])
-        waited = (now - parse_timestamp(case["updated_at"])).total_seconds()
-        return (SEVERITY_RANK.get(severity or "", 0), float(case["invoice"]["total"]), waited)
-
-    return sorted(cases, key=priority, reverse=True)
-
-
 def select_case(case_id: str) -> None:
     st.query_params["case"] = case_id
 
@@ -50,18 +38,27 @@ def clear_confirmation() -> None:
     st.session_state.pop("review_confirm", None)
 
 
-def queue_card(case: dict, now: datetime, selected: bool) -> None:
-    invoice = case["invoice"]
-    exception, severity, _ = primary_exception(case["state"])
-    chip = severity_chip(severity)
-    waited = (now - parse_timestamp(case["updated_at"])).total_seconds()
+def pending_queue(app) -> list[dict]:
+    """Pending cases by severity, then invoice value, then time waiting."""
+    rows, _ = app.query_cases(view="review", sort="priority", limit=None)
+    return rows
+
+
+def waited_seconds(row: dict, now: datetime) -> float:
+    since = parse_timestamp(row["review_requested_at"] or row["updated_at"])
+    return max(0.0, (now - since).total_seconds())
+
+
+def queue_card(row: dict, now: datetime, selected: bool) -> None:
+    chip = severity_chip(row["max_severity"])
+    waited = waited_seconds(row, now)
     late = " p2p-queue-late" if waited > DAY else ""
-    with st.container(key=f"queue-card-{case['case_id']}"):
+    with st.container(key=f"queue-card-{row['case_id']}"):
         render_html(
             f"""
             <div class="p2p-queue-card{" p2p-queue-selected" if selected else ""}">
-              <div class="p2p-queue-top"><strong>{h(invoice["supplier_name"])}</strong><span>{h(format_money(invoice["total"], invoice["currency"]))}</span></div>
-              <span class="p2p-muted">{h(label_exception(exception))}</span>
+              <div class="p2p-queue-top"><strong>{h(row["supplier_name"])}</strong><span>{h(format_money(row["total"], row["currency"]))}</span></div>
+              <span class="p2p-muted">{h(label_exception(row["primary_exception"]))}</span>
               <div class="p2p-queue-bottom">
                 <span class="p2p-severity-chip p2p-severity-{h(chip.key)}">{h(chip.text)}</span>
                 <span class="p2p-queue-wait{late}">{icon("schedule")}{h(format_duration(waited))}</span>
@@ -71,11 +68,11 @@ def queue_card(case: dict, now: datetime, selected: bool) -> None:
         )
         st.button(
             "Open",
-            key=f"queue_open_{case['case_id']}",
+            key=f"queue_open_{row['case_id']}",
             width="stretch",
             type="primary" if selected else "secondary",
             on_click=select_case,
-            args=(case["case_id"],),
+            args=(row["case_id"],),
         )
 
 
@@ -154,7 +151,7 @@ def apply_review(case: dict, app, action: DecisionType, request: dict) -> None:
             "text": "The review could not be applied. Reload the case and try again.",
         }
         st.rerun()
-    remaining = queue(app.list_cases("PENDING_REVIEW"), datetime.now(UTC))
+    remaining = pending_queue(app)
     st.session_state["flash"] = {
         "kind": "toast",
         "text": (
@@ -259,17 +256,20 @@ def empty_queue() -> None:
 def render() -> None:
     app = service()
     now = datetime.now(UTC)
-    pending = queue(app.list_cases("PENDING_REVIEW"), now)
+    pending = pending_queue(app)
     if not pending:
         empty_queue()
         return
 
-    by_id = {case["case_id"]: case for case in pending}
+    by_id = {row["case_id"]: row for row in pending}
     selected_id = st.query_params.get("case")
     if selected_id not in by_id:
         selected_id = pending[0]["case_id"]
     st.query_params["case"] = selected_id
-    case = app.get_case(selected_id) or by_id[selected_id]
+    case = app.get_case(selected_id)
+    if case is None:
+        st.error(f"Case {selected_id} was not found.")
+        return
 
     top_bar(["Review queue", case["invoice_id"]], "/review")
     if st.session_state.get("review_confirm", {}).get("case_id") == selected_id:

@@ -99,11 +99,17 @@ class StatusView:
 
 
 def display_status(case: dict) -> StatusView:
+    """Accepts a get_case() view or a query_cases() row."""
     status = case.get("status")
+    if case.get("last_error") and status != "COMPLETED":
+        return StatusView("recovery", "Needs recovery")
     if status == "PENDING_REVIEW":
         return StatusView("review", "Awaiting review")
     if status == "COMPLETED":
-        outcome = (case.get("state") or {}).get("outcome") or {}
+        outcome = (case.get("state") or {}).get("outcome") or {
+            "action": case.get("outcome_action"),
+            "source": case.get("outcome_source"),
+        }
         action = outcome.get("action")
         if action in OUTCOME_LABELS:
             source = "Autonomous" if outcome.get("source") == "AUTONOMOUS" else "Human"
@@ -446,7 +452,11 @@ def match_view(state: dict, rules: BusinessRules) -> MatchView:
                 _number(line["quantity"]),
                 _number(po_line["ordered_quantity"]) if po_line else "—",
                 _number(received) if receipts else ("—" if no_po else "Not received"),
-                "; ".join(_variance_text(item, currency, money=False) for item in quantity_items)
+                "; ".join(
+                    _variance_text(item, currency, money=False)
+                    for item in quantity_items
+                    if item.get("variance_absolute") is not None
+                )
                 or "None recorded",
                 _result(quantity_items, no_po or unmatched or "MISSING_GRN" in types),
                 quantity_tolerance,

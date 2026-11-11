@@ -78,6 +78,7 @@ def main() -> None:
     )
     load_styles()
     app = service()
+    app.refresh_open_cases()
     pending_review = app.pending_review_count()
     st.session_state["p2p_pending_review"] = pending_review
     pages = build_pages(pending_review)
