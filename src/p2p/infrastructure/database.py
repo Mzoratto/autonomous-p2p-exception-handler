@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -24,9 +25,10 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    update,
 )
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, defer, mapped_column, sessionmaker
 
 from p2p.domain.casefacts import project
 from p2p.domain.models import (
@@ -46,6 +48,15 @@ from p2p.domain.models import (
 def _utcnow() -> datetime:
     """Storage keeps naive UTC; every value leaving the repository is tz-aware."""
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def is_transient(exc: BaseException) -> bool:
+    """A busy or locked database: retrying later can succeed, so no row is at fault."""
+    if not isinstance(exc, OperationalError):
+        return False
+    code = getattr(exc.orig, "sqlite_errorcode", None)
+    # Extended result codes keep the primary code in the low byte.
+    return code is not None and code & 0xFF in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
 
 
 class Base(DeclarativeBase):
@@ -236,16 +247,21 @@ class Database:
                 try:
                     self._backfill(session, session.get(CaseRow, case_id))
                     session.commit()
-                except OperationalError:
-                    # Locked or busy database: nothing is wrong with the row, so leave it
-                    # unmarked and let the next start retry it.
-                    session.rollback()
-                    raise
                 except Exception as exc:
                     session.rollback()
-                    row = session.get(CaseRow, case_id)
-                    row.created_at = row.updated_at
-                    row.last_error = f"Migration could not read stored state: {type(exc).__name__}"
+                    if is_transient(exc):
+                        # Nothing is wrong with the row; leave it for the next start.
+                        raise
+                    # Mark without loading the row again: its payloads may not even decode.
+                    session.execute(
+                        update(CaseRow.__table__)
+                        .where(CaseRow.__table__.c.case_id == case_id)
+                        .values(
+                            created_at=CaseRow.__table__.c.updated_at,
+                            last_error="Migration could not read stored state: "
+                            f"{type(exc).__name__}",
+                        )
+                    )
                     session.commit()
 
     @staticmethod
@@ -483,7 +499,13 @@ class SqliteRepository:
 
     def get_case(self, case_id: str) -> dict | None:
         with self.database.session_factory() as session:
-            row = session.get(CaseRow, case_id)
+            try:
+                row = session.get(CaseRow, case_id)
+            except OperationalError as exc:
+                if is_transient(exc):
+                    raise
+                # Undecodable stored text: report it like any other unreadable case.
+                raise ValueError(f"Stored case could not be read: {exc.orig}") from exc
             return self._case_dict(row) if row else None
 
     def list_cases(self, status: str | None = None) -> list[dict]:
@@ -513,7 +535,15 @@ class SqliteRepository:
             raise ValueError(f"Unknown case view: {view}")
         if sort not in CASE_SORTS:
             raise ValueError(f"Unknown case sort: {sort}")
-        statement = select(CaseRow).where(*CASE_VIEWS[view])
+        # Payloads are never needed here; loading them would also fail on an undecodable row.
+        statement = (
+            select(CaseRow)
+            .options(
+                defer(CaseRow.invoice_payload, raiseload=True),
+                defer(CaseRow.state_payload, raiseload=True),
+            )
+            .where(*CASE_VIEWS[view])
+        )
         term = search.strip().lower()
         if term:
             escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -555,12 +585,18 @@ class SqliteRepository:
             }
 
     def record_error(self, case_id: str, message: str) -> None:
-        """Store the last failure for a case without touching its status."""
+        """Store the last failure for a case without touching its status or reading payloads."""
         message = message[:MAX_ERROR_LENGTH]
         with self.database.session_factory() as session:
-            row = session.get(CaseRow, case_id)
-            if row is not None and row.last_error != message:
-                row.last_error = message
+            current = session.execute(
+                select(CaseRow.last_error).where(CaseRow.case_id == case_id)
+            ).first()
+            if current is not None and current.last_error != message:
+                session.execute(
+                    update(CaseRow.__table__)
+                    .where(CaseRow.__table__.c.case_id == case_id)
+                    .values(last_error=message)
+                )
                 session.commit()
 
     @staticmethod

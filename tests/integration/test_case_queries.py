@@ -120,8 +120,9 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         "02_small_price_variance",
         "03_large_price_variance",
         "04_quantity_variance",
+        "05_quantity_exceeds_receipt",
     )
-    valid, oversized, broken, non_scalar = cases.values()
+    valid, oversized, broken, non_scalar, undecodable = cases.values()
     runtime.close()
     legacy = tmp_path / "legacy.db"
     legacy_copy(source, legacy, list(cases.values()), corrupt={broken})
@@ -137,6 +138,11 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
             "UPDATE cases SET invoice_payload = json_set(invoice_payload, '$.supplier_name', "
             "json('[]')) WHERE case_id = ?",
             (non_scalar,),
+        )
+        # TEXT that is not valid UTF-8: the driver cannot even load the row.
+        connection.execute(
+            "UPDATE cases SET state_payload = CAST(X'7BFF' AS TEXT) WHERE case_id = ?",
+            (undecodable,),
         )
 
     database = Database(f"sqlite:///{legacy}")
@@ -155,6 +161,12 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         assert (row.supplier_name, row.total_cents, row.created_at) == (None, None, row.updated_at)
         assert session.get(CaseRow, valid).supplier_name == "Acme Components"
     database.engine.dispose()
+    with sqlite3.connect(legacy) as connection:
+        assert connection.execute(
+            "SELECT created_at = updated_at, last_error, supplier_name FROM cases "
+            "WHERE case_id = ?",
+            (undecodable,),
+        ).fetchone() == (1, "Migration could not read stored state: OperationalError", None)
 
     monkeypatch.setenv("DEMO_MODE", "true")
     monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{legacy}")
@@ -170,6 +182,7 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         oversized: "Needs recovery",
         broken: "Needs recovery",
         non_scalar: "Needs recovery",
+        undecodable: "Needs recovery",
     }
 
 
@@ -184,7 +197,9 @@ def test_migration_leaves_a_row_unmarked_when_the_database_is_busy(tmp_path, mon
     legacy_copy(source, legacy, [case_id])
 
     def locked(session, row):
-        raise OperationalError("UPDATE cases", {}, sqlite3.OperationalError("database is locked"))
+        busy = sqlite3.OperationalError("database is locked")
+        busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        raise OperationalError("UPDATE cases", {}, busy)
 
     monkeypatch.setattr(Database, "_backfill", staticmethod(locked))
     with pytest.raises(OperationalError):
