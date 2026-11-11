@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from workflow_support import BrokenMatcher, use_workflow
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.casefacts import primary_exception
@@ -187,3 +188,19 @@ def test_waiting_labels_keep_cases_with_the_same_invoice_id_apart():
     ]
 
     assert waiting_labels(waiting) == ["INV-1 · CASE-A", "INV-1 · CASE-B", "INV-2"]
+
+
+def test_a_run_that_failed_before_matching_is_not_shown_as_matched(app, rules):
+    use_workflow(app, matcher=BrokenMatcher(OSError("disk full")))
+    with pytest.raises(OSError):
+        app.process_invoice(demo_invoices()["03_large_price_variance"])
+    [stored], _ = app.query_cases()
+    case = app.get_case(stored["case_id"])
+
+    header = case_header(case, datetime.now(UTC), "Ana Reviewer", UTC_ZONE)
+    match = match_view(case["state"], rules)
+    labels = tab_labels(match, ai_story(case, rules), policy_view(case["state"]), 3)
+
+    assert next(item.value for item in header.meta if item.label == "Exception") == "Not checked"
+    assert labels["match"] == "Three-way match · Not run"
+    assert (match.ran, match.tiles, match.lines) == (False, [], [])

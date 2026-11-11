@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
+import os
+from functools import cache
 from pathlib import Path
 
 import streamlit as st
 
 from p2p.ui.components.chips import h, render_html
-from p2p.ui.components.shell import load_styles, render_flash
+from p2p.ui.components.shell import SETUP_ERROR_KEY, load_styles, render_flash, setup_screen
 from p2p.ui.runtime import service
 
 UI_DIR = Path(__file__).parent
@@ -69,6 +72,15 @@ def runtime_card() -> None:
     )
 
 
+@cache
+def configure_logging() -> None:
+    """Once per process: Streamlit reruns main() on every interaction."""
+    logging.basicConfig(
+        level=os.getenv("P2P_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="P2P Exception Control Center",
@@ -77,7 +89,13 @@ def main() -> None:
         initial_sidebar_state="auto",
     )
     load_styles()
-    app = service()
+    configure_logging()
+    try:
+        app = service()
+    except RuntimeError:
+        setup_screen("Live mode needs an API key")
+    if st.session_state.get(SETUP_ERROR_KEY) == "auth":
+        setup_screen("Live mode cannot authenticate")
     app.refresh_open_cases()
     pending_review = app.pending_review_count()
     st.session_state["p2p_pending_review"] = pending_review

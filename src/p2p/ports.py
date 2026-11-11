@@ -38,3 +38,11 @@ class AuditRecorder(Protocol):
 
 class ModelProvider(Protocol):
     def structured_response(self, schema: type[T], messages: list[dict[str, str]]) -> T: ...
+
+
+class ModelUnavailableError(RuntimeError):
+    """The model service could not be reached or is overloaded; the case goes to a reviewer."""
+
+
+class ModelAuthenticationError(RuntimeError):
+    """The model service rejected the credentials; a configuration fault, not an outage."""

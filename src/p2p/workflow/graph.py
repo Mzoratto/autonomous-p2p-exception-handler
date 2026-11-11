@@ -17,7 +17,13 @@ from p2p.workflow.nodes import (
     policy_check_node,
     resolve_node,
 )
-from p2p.workflow.routing import route_after_critique, route_after_match, route_after_policy
+from p2p.workflow.routing import (
+    route_after_critique,
+    route_after_investigation,
+    route_after_match,
+    route_after_policy,
+    route_after_resolution,
+)
 from p2p.workflow.state import P2PState
 
 
@@ -37,8 +43,8 @@ def build_graph(deps: WorkflowDependencies, checkpointer: Any):
     graph.add_edge("ingest", "load_context")
     graph.add_edge("load_context", "match")
     graph.add_conditional_edges("match", route_after_match)
-    graph.add_edge("investigate", "resolve")
-    graph.add_edge("resolve", "critique")
+    graph.add_conditional_edges("investigate", route_after_investigation)
+    graph.add_conditional_edges("resolve", route_after_resolution)
     graph.add_conditional_edges("critique", route_after_critique)
     graph.add_conditional_edges("policy_check", route_after_policy)
     graph.add_edge("human_review", "finalize")

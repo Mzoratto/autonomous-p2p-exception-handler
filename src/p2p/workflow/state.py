@@ -29,3 +29,4 @@ class P2PState(TypedDict, total=False):
     reflection_count: int
     reflection_exhausted: bool
     model_error: str | None
+    model_unavailable: bool

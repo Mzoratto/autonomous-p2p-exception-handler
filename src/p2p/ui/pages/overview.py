@@ -6,8 +6,9 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from p2p.ports import ModelAuthenticationError
 from p2p.ui.components.chips import h, icon, render_html
-from p2p.ui.components.shell import page_header, switch_to, top_bar
+from p2p.ui.components.shell import mark_authentication_failure, page_header, switch_to, top_bar
 from p2p.ui.runtime import service
 from p2p.ui.viewmodels import (
     format_duration,
@@ -116,6 +117,8 @@ def run_all() -> None:
         for name, invoice in app.demo_invoices().items():
             try:
                 results.append(app.process_invoice(invoice))
+            except ModelAuthenticationError:
+                mark_authentication_failure()
             except Exception as exc:
                 failures.append(f"{name}: {type(exc).__name__}: {exc}")
     if results and all(result["is_replay"] for result in results):

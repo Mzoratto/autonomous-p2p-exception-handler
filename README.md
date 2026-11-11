@@ -132,6 +132,18 @@ OPENAI_MODEL=gpt-4.1-mini
 
 The live adapter uses the same typed provider interface and Pydantic response schemas as demo mode.
 
+Optional live-mode settings:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `OPENAI_TIMEOUT_SECONDS` | `30` | Per-request timeout |
+| `OPENAI_MAX_RETRIES` | `1` | SDK retries before a request counts as failed |
+| `OPENAI_BASE_URL` | unset | Alternative OpenAI-compatible endpoint |
+
+Requests are sent with `store=False`. Each AI audit event records the model, response id, token counts and latency of the call.
+
+When the model service cannot be reached (timeout, connection error, rate limit, server error), the workflow stops asking the model, records the failure and sends the case to a reviewer. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
+
 Never commit a real API key. `.env.local` is ignored by Git.
 
 ## Run with Docker
@@ -192,6 +204,10 @@ For local runs, the rules file is resolved from the project directory. Packaged 
 The dashboard has no login. Reviews are signed with the name in `P2P_REVIEWER_NAME` (default `Demo Reviewer`), and its initials appear in the top bar.
 
 The case table stores a queryable summary of each case (supplier, amount, primary exception, AI recommendation, outcome and key timestamps) next to the full payloads. Opening a database created before these columns existed adds them and backfills existing cases from their payloads and audit events; the step runs once and is safe to repeat.
+
+`P2P_DATABASE_URL` must be a `sqlite:///` file path. The database runs in WAL mode, so pages keep loading while a case is being processed; a case that is mid-run shows as "Processing" until the run finishes. When a run fails, the error is stored on the case, which shows as "Needs recovery" with the error under "Technical details" and a "Retry processing" button that resumes it from its last saved step.
+
+Logs go to standard error at the level in `P2P_LOG_LEVEL` (default `INFO`): the start, outcome and duration of every processing and review run, and every model failure.
 
 ## Project scope
 

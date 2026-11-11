@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import statistics
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -11,7 +13,6 @@ from typing import Any, get_type_hints
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
@@ -45,7 +46,13 @@ from p2p.domain.models import (
     Supplier,
 )
 from p2p.domain.policy import DecisionPolicy
-from p2p.infrastructure.database import Database, SqliteRepository, demo_invoices, seed_database
+from p2p.infrastructure.database import (
+    BUSY_TIMEOUT_MS,
+    Database,
+    SqliteRepository,
+    demo_invoices,
+    seed_database,
+)
 from p2p.intelligence.providers import MockModelProvider, OpenAIModelProvider
 from p2p.intelligence.services import Critic, Investigator, Resolver
 from p2p.workflow.graph import build_graph
@@ -60,6 +67,8 @@ def _is_true(value: str | bool | None) -> bool:
 
 
 HUMAN_SOURCES = {"HUMAN_APPROVED", "HUMAN_OVERRIDDEN"}
+
+logger = logging.getLogger("p2p.service")
 
 
 def _value_by_currency(rows: list[dict]) -> dict[str, str]:
@@ -144,39 +153,37 @@ def create_runtime(
 
     connection: sqlite3.Connection | None = None
     if checkpointer is None:
-        if url.startswith("sqlite:///"):
-            checkpoint_path = url.removeprefix("sqlite:///")
-            connection = sqlite3.connect(checkpoint_path, check_same_thread=False)
-            serializer = JsonPlusSerializer(
-                allowed_msgpack_modules=[
-                    CaseOutcome,
-                    CritiqueResult,
-                    DecisionSource,
-                    DecisionType,
-                    Discrepancy,
-                    DiscrepancyType,
-                    ERPContext,
-                    EvidenceItem,
-                    GoodsReceipt,
-                    GoodsReceiptLine,
-                    HumanReview,
-                    InvestigationResult,
-                    Invoice,
-                    InvoiceLine,
-                    InvoiceSummary,
-                    MatchResult,
-                    PolicyCheck,
-                    PolicyResult,
-                    PurchaseOrder,
-                    PurchaseOrderLine,
-                    Resolution,
-                    Severity,
-                    Supplier,
-                ]
-            )
-            checkpointer = SqliteSaver(connection, serde=serializer)
-        else:
-            checkpointer = InMemorySaver()
+        # Database() already rejected anything but a sqlite:/// file path.
+        connection = sqlite3.connect(url.removeprefix("sqlite:///"), check_same_thread=False)
+        connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        serializer = JsonPlusSerializer(
+            allowed_msgpack_modules=[
+                CaseOutcome,
+                CritiqueResult,
+                DecisionSource,
+                DecisionType,
+                Discrepancy,
+                DiscrepancyType,
+                ERPContext,
+                EvidenceItem,
+                GoodsReceipt,
+                GoodsReceiptLine,
+                HumanReview,
+                InvestigationResult,
+                Invoice,
+                InvoiceLine,
+                InvoiceSummary,
+                MatchResult,
+                PolicyCheck,
+                PolicyResult,
+                PurchaseOrder,
+                PurchaseOrderLine,
+                Resolution,
+                Severity,
+                Supplier,
+            ]
+        )
+        checkpointer = SqliteSaver(connection, serde=serializer)
     graph = build_graph(deps, checkpointer)
     return Runtime(
         repository,
@@ -255,6 +262,29 @@ class CaseService:
         repository.save_case(case_id, state["invoice"], status, state)
         return repository.get_case(case_id)
 
+    def _run(self, case_id: str, action: str, graph_input: Any, config: dict) -> dict:
+        """Run the graph for one command; a failure is stored on the case, then re-raised."""
+        started = time.monotonic()
+        logger.info("%s started for %s", action, case_id)
+        try:
+            self.runtime.graph.invoke(graph_input, config=config)
+            case = self._reconcile(case_id)
+        except Exception as exc:
+            logger.exception("%s failed for %s", action, case_id)
+            try:
+                self.runtime.repository.record_error(case_id, f"{type(exc).__name__}: {exc}")
+            except Exception:
+                logger.exception("Could not record the failure for %s", case_id)
+            raise
+        logger.info(
+            "%s finished for %s: %s in %d ms",
+            action,
+            case_id,
+            case["status"],
+            (time.monotonic() - started) * 1000,
+        )
+        return self._result(case)
+
     def process_invoice(self, invoice: Invoice, case_id: str | None = None) -> dict:
         invoice = Invoice.model_validate(invoice.model_dump())
         repository = self.runtime.repository
@@ -270,11 +300,8 @@ class CaseService:
             if case["status"] != "PROCESSING":
                 return self._result(case, is_replay=not created and settled_before)
             snapshot = self.runtime.graph.get_state(config)
-            self.runtime.graph.invoke(
-                {"case_id": case_id, "invoice": invoice} if not snapshot.values else None,
-                config=config,
-            )
-            return self._result(self._reconcile(case_id))
+            graph_input = {"case_id": case_id, "invoice": invoice} if not snapshot.values else None
+            return self._run(case_id, "Processing", graph_input, config)
 
     def review_case(
         self, case_id: str, review: HumanReview, checkpoint_id: str | None = None
@@ -299,13 +326,16 @@ class CaseService:
             ):
                 raise ValueError("No matching active human-review interrupt")
             submitted = repository.bind_review(case_id, review.model_dump(mode="json"), revision)
-            self.runtime.graph.invoke(Command(resume=submitted), config=config)
-            return self._result(self._reconcile(case_id))
+            return self._run(case_id, "Review", Command(resume=submitted), config)
 
     def get_case(self, case_id: str) -> dict | None:
-        with self.runtime.repository.command_lock():
-            case = self.runtime.repository.get_case(case_id)
-            if case:
+        """The reconciled case, or the stored row marked `busy` while a command holds the lock."""
+        repository = self.runtime.repository
+        with repository.try_command_lock() as acquired:
+            case = repository.get_case(case_id)
+            if not case:
+                return case
+            if acquired:
                 case = self._reconcile(case_id)
                 snapshot = self.runtime.graph.get_state({"configurable": {"thread_id": case_id}})
                 case["checkpoint_id"] = (
@@ -313,17 +343,25 @@ class CaseService:
                     if snapshot.config
                     else None
                 )
-                case["submitted_review"] = self.runtime.repository.submitted_review(case_id)
-                case["audit"] = [
-                    event.model_dump(mode="json")
-                    for event in self.runtime.repository.for_case(case_id)
-                ]
+            else:
+                case["checkpoint_id"] = None
+            case["busy"] = not acquired
+            case["submitted_review"] = repository.submitted_review(case_id)
+            case["audit"] = [
+                event.model_dump(mode="json") for event in repository.for_case(case_id)
+            ]
             return case
 
     def refresh_open_cases(self) -> None:
-        """Reconcile every case that is not COMPLETED; a broken case is recorded, not raised."""
+        """Reconcile every case that is not COMPLETED; a broken case is recorded, not raised.
+
+        Skipped while a command runs: the command reconciles its own case, and the page must
+        not wait for it.
+        """
         repository = self.runtime.repository
-        with repository.command_lock():
+        with repository.try_command_lock() as acquired:
+            if not acquired:
+                return
             for case_id in repository.open_case_ids():
                 try:
                     self._reconcile(case_id)
