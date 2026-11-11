@@ -1,10 +1,60 @@
 [theme]
 base = "light"
 primaryColor = "#2f6fed"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f4f7fb"
-textColor = "#172033"
-font = "sans serif"
+backgroundColor = "#f1f3f6"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#131a26"
+linkColor = "#1d4fc4"
+borderColor = "#e2e5ea"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+baseFontSize = 14
+font = "IBM Plex Sans, sans-serif"
+headingFont = "IBM Plex Sans, sans-serif"
+codeFont = "IBM Plex Mono, monospace"
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-400.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-500.woff2"
+weight = 500
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-600.woff2"
+weight = 600
+
+[[theme.fontFaces]]
+family = "IBM Plex Sans"
+url = "app/static/fonts/ibm-plex-sans-700.woff2"
+weight = 700
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-400.woff2"
+weight = 400
+
+[[theme.fontFaces]]
+family = "IBM Plex Mono"
+url = "app/static/fonts/ibm-plex-mono-500.woff2"
+weight = 500
+
+[theme.sidebar]
+backgroundColor = "#0e1525"
+secondaryBackgroundColor = "#151e32"
+textColor = "#dce4f2"
+borderColor = "#232d44"
+primaryColor = "#2f6fed"
+
+[server]
+enableStaticServing = true
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false

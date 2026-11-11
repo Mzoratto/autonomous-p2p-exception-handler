@@ -86,6 +86,8 @@ class Runtime:
     rules: BusinessRules
     demo_mode: bool
     checkpoint_connection: sqlite3.Connection | None = None
+    rules_path: Path | None = None
+    model_name: str = "Mock provider"
 
     def close(self) -> None:
         if self.checkpoint_connection:
@@ -102,7 +104,8 @@ def create_runtime(
     load_dotenv(".env.local")
     load_dotenv(".env")
     url = database_url or os.getenv("P2P_DATABASE_URL", "sqlite:///data/demo/p2p.db")
-    rules = BusinessRules.load(resolve_rules_path(rules_path))
+    resolved_rules_path = resolve_rules_path(rules_path)
+    rules = BusinessRules.load(resolved_rules_path)
     database = Database(url)
     database.create_all()
     repository = SqliteRepository(database)
@@ -112,6 +115,7 @@ def create_runtime(
 
     use_demo = _is_true(os.getenv("DEMO_MODE", "true")) if demo_mode is None else demo_mode
     provider = MockModelProvider() if use_demo else OpenAIModelProvider()
+    model_name = "Mock provider" if use_demo else provider.model
     deps = WorkflowDependencies(
         erp=repository,
         audit=repository,
@@ -158,7 +162,15 @@ def create_runtime(
         else:
             checkpointer = InMemorySaver()
     graph = build_graph(deps, checkpointer)
-    return Runtime(repository, graph, rules, use_demo, connection)
+    return Runtime(
+        repository,
+        graph,
+        rules,
+        use_demo,
+        connection,
+        rules_path=resolved_rules_path,
+        model_name=model_name,
+    )
 
 
 class CaseService:
@@ -306,9 +318,12 @@ class CaseService:
             for discrepancy in item["state"].get("match_result", {}).get("discrepancies", []):
                 name = discrepancy["type"]
                 exception_types[name] = exception_types.get(name, 0) + 1
+        counts_by_status: dict[str, int] = {}
+        for item in cases:
+            counts_by_status[item["status"]] = counts_by_status.get(item["status"], 0) + 1
         return {
             "total": len(cases),
-            "pending": len(cases) - len(completed),
+            "counts_by_status": counts_by_status,
             "autonomous_rate": len(autonomous) / len(completed) if completed else 0,
             "average_confidence": sum(confidences) / len(confidences) if confidences else 0,
             "actions": actions,

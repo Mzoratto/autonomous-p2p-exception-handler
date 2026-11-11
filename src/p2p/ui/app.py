@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -10,18 +9,28 @@ from pydantic import ValidationError
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import DecisionType, HumanReview, Invoice
+from p2p.ui.identity import current_reviewer, initials
+from p2p.ui.viewmodels import (
+    ACTION_STATUS_KEYS,
+    OUTCOME_LABELS,
+    display_status,
+    format_money,
+    label_action,
+    label_event,
+    label_exception,
+    validation_rows,
+)
 
 NAV_ITEMS = ["Overview", "Process Invoice", "Cases", "Review Queue"]
 
 
 def render_html(markup: str) -> None:
-    """Render generated HTML without Markdown interpreting indented siblings."""
-    st.html("".join(line.strip() for line in markup.splitlines()))
+    st.html(markup)
 
 
 st.set_page_config(
     page_title="P2P Exception Control Center",
-    page_icon="◈",
+    page_icon=":material/fact_check:",
     layout="wide",
     initial_sidebar_state="auto",
 )
@@ -29,31 +38,40 @@ st.set_page_config(
 UI_STYLES = """
 <style>
   :root {
-    --ink: #0f172a;
-    --muted: #64748b;
-    --line: #e2e8f0;
+    --ink: #131a26;
+    --ink-2: #475264;
+    --muted: #5b6576;
+    --page: #f1f3f6;
     --surface: #ffffff;
-    --surface-subtle: #f8fafc;
+    --surface-subtle: #f8f9fb;
+    --line: #e2e5ea;
+    --line-soft: #edf0f3;
+    --blue: #2f6fed;
+    --link: #1d4fc4;
+    --blue-soft: #e8effd;
     --navy: #0e1525;
-    --blue: #315bea;
-    --blue-soft: #eef2ff;
-    --green: #16854f;
-    --green-soft: #edf9f1;
-    --amber: #b46a08;
-    --amber-soft: #fff7e8;
-    --red: #c23b4a;
-    --red-soft: #fff1f2;
-    --radius: 14px;
-    --shadow: 0 1px 4px rgba(15, 23, 42, .07);
+    --navy-card: #151e32;
+    --sidebar-text: #dce4f2;
+    --sidebar-muted: #a7b3c9;
+    --sev-critical-fg: #a1122b; --sev-critical-bg: #fce7eb; --sev-critical-bar: #d23a50;
+    --sev-material-fg: #a6380f; --sev-material-bg: #fcebe3; --sev-material-bar: #e0703a;
+    --sev-warning-fg: #7f4d00; --sev-warning-bg: #fcf1dc; --sev-warning-bar: #d9a032;
+    --sev-info-fg: #33507a; --sev-info-bg: #eaf0f8; --sev-info-bar: #7f9cc4;
+    --sev-none-fg: #475264; --sev-none-bg: #eef0f3;
+    --status-review-fg: #7f4d00; --status-review-bg: #fcf1dc; --status-review-dot: #c98512;
+    --status-approved-fg: #14653f; --status-approved-bg: #e3f3ea; --status-approved-dot: #1f9a5e;
+    --status-rejected-fg: #a1122b; --status-rejected-bg: #fce7eb; --status-rejected-dot: #d23a50;
+    --status-request-info-fg: #1d4fc4; --status-request-info-bg: #e8effd; --status-request-info-dot: #2f6fed;
+    --status-processing-fg: #475264; --status-processing-bg: #eef0f3; --status-processing-dot: #5b6576;
+    --radius-card: 12px;
+    --radius-control: 8px;
+    --radius-chip: 999px;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
   }
 
-  html, body, [class*="css"] {
-    color: var(--ink);
-    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  .stApp { background: #f0f2f6; }
-  [data-testid="stHeader"] { background: transparent; }
+  html, body, [class*="css"] { color: var(--ink); }
   .block-container { max-width: 1480px; padding: 3.75rem 2rem 4rem; }
+  .p2p-icon { font-family: 'Material Symbols Rounded'; font-size: 20px; line-height: 1; font-feature-settings: 'liga'; font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; white-space: nowrap; }
 
   /* Sidebar */
   [data-testid="stSidebar"] {
@@ -61,179 +79,176 @@ UI_STYLES = """
     background: var(--navy); border-right: 0;
   }
   [data-testid="stSidebar"] > div:first-child { padding: 1.5rem 1rem; }
-  [data-testid="stSidebar"] * { color: #dce4f2; }
+  [data-testid="stSidebar"] * { color: var(--sidebar-text); }
   [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.11); }
   [data-testid="stSidebar"] [data-testid="stRadio"] label {
-    min-height: 2.5rem; padding: .55rem .72rem;
-    border-radius: 8px; font-size: .78rem; font-weight: 590;
+    min-height: 40px; padding: 8px 12px;
+    border-radius: var(--radius-control); font-size: 14px; font-weight: 500;
     transition: background .15s ease, color .15s ease;
   }
   [data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
     background: rgba(255,255,255,.07);
   }
   [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
-    background: #315bea;
-    color: white;
+    background: var(--blue);
+    color: #ffffff;
   }
   [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) * {
-    color: white !important;
+    color: #ffffff !important;
   }
   [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child {
     display: none;
   }
-  .brand { display:flex; gap:.62rem; align-items:flex-start; margin:0 .28rem 2.25rem; }
+  .brand { display:flex; gap:10px; align-items:center; margin:0 4px 32px; }
   .brand-mark {
-    display:grid; place-items:center; width:22px; height:22px; flex:0 0 22px;
-    border:1px solid #7698ff; border-radius:7px; color:#8fa9ff !important;
-    font-size:.72rem; margin-top:.08rem;
+    display:grid; place-items:center; width:34px; height:34px; flex:0 0 34px;
+    border:1.5px solid #5d8bf4; border-radius:var(--radius-control); color:#cfdcff !important;
+    font-size:12px; font-weight:700; letter-spacing:.02em;
   }
-  .brand-name { color:white !important; font-size:.92rem; font-weight:740; letter-spacing:-.025em; line-height:1.2; }
-  .brand-kicker { color:#8c9ab4 !important; font-size:.61rem; margin-top:.15rem; }
+  .brand-name { color:#ffffff !important; font-size:16px; font-weight:700; letter-spacing:-.01em; line-height:1.2; }
+  .brand-kicker { color:var(--sidebar-muted) !important; font-size:12px; margin-top:2px; }
   .runtime-card {
-    position:fixed; left:16px; bottom:18px; width:208px;
-    padding:.85rem; border-radius:10px;
-    background:#151e32; border:1px solid rgba(255,255,255,.08);
+    margin-top:24px; padding:14px; border-radius:10px;
+    background:var(--navy-card); border:1px solid rgba(255,255,255,.08);
   }
-  .runtime-label { color:#8c9ab4 !important; font-size:.58rem; font-weight:700; text-transform:uppercase; letter-spacing:.13em; }
-  .runtime-value { color:white !important; font-size:.72rem; font-weight:650; margin:.4rem 0 .65rem; }
-  .runtime-grid { display:grid; grid-template-columns:auto 1fr; gap:.32rem .55rem; font-size:.61rem; }
-  .runtime-grid span:nth-child(odd) { color:#8290aa !important; }
-  .runtime-grid span:nth-child(even) { color:#dbe4f3 !important; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .live-dot { display:inline-block; width:6px; height:6px; margin-right:.4rem; border-radius:50%; background:#51d39a; box-shadow:0 0 0 3px rgba(81,211,154,.12); }
+  .runtime-label { color:var(--sidebar-muted) !important; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.1em; margin-bottom:10px; }
+  .runtime-row { display:flex; justify-content:space-between; gap:10px; font-size:13px; line-height:1.9; }
+  .runtime-row span:first-child { color:var(--sidebar-muted) !important; white-space:nowrap; }
+  .runtime-row span:last-child { color:var(--sidebar-text) !important; min-width:0; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .st-key-mobile-navigation { display:none; }
 
   /* Page structure */
-  .topbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; min-height:2.1rem; margin:-.65rem 0 1.35rem; }
-  .breadcrumb { color:#94a3b8; font-size:.67rem; font-weight:600; }
-  .breadcrumb strong { color:#475569; font-weight:700; }
-  .topbar-right { display:flex; align-items:center; gap:1rem; }
-  .system-health { display:inline-flex; align-items:center; gap:.42rem; color:var(--green); font-size:.62rem; font-weight:760; letter-spacing:.08em; text-transform:uppercase; }
-  .system-health i { width:6px; height:6px; border-radius:50%; background:#2fb36b; box-shadow:0 0 0 4px #e7f7ed; }
-  .topbar-update { color:#94a3b8; font-size:.62rem; }
-  .operator-avatar { display:grid; place-items:center; width:27px; height:27px; border-radius:50%; background:#111827; color:white; font-size:.61rem; font-weight:760; }
-  .page-header { display:flex; align-items:flex-end; justify-content:space-between; gap:1.25rem; margin-bottom:1.5rem; }
-  .eyebrow { color:var(--blue); font-size:.61rem; font-weight:760; letter-spacing:.14em; text-transform:uppercase; margin-bottom:.38rem; }
-  .page-header h1 { color:var(--ink); font-size:clamp(1.72rem,3vw,2rem); letter-spacing:-.04em; line-height:1.14; margin:0; }
-  .page-header p { color:var(--muted); font-size:.78rem; max-width:720px; margin:.38rem 0 0; }
-  .section-title { color:var(--ink); font-size:.93rem; font-weight:720; letter-spacing:-.015em; margin:0 0 .9rem; }
-  .section-subtitle { color: var(--muted); font-size: .76rem; margin-top: -.65rem; margin-bottom: .8rem; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:34px; margin:-10px 0 22px; }
+  .breadcrumb { color:var(--muted); font-size:13px; font-weight:500; }
+  .breadcrumb strong { color:var(--ink); font-weight:600; }
+  .topbar-right { display:flex; align-items:center; gap:16px; }
+  .operator-avatar { display:grid; place-items:center; width:32px; height:32px; border-radius:50%; background:var(--blue-soft); color:var(--link); font-size:12px; font-weight:600; }
+  .page-header { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:24px; }
+  .eyebrow { color:var(--link); font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; margin-bottom:4px; }
+  .page-header h1 { color:var(--ink); font-size:28px; font-weight:700; letter-spacing:-.02em; line-height:1.2; margin:0; padding:0; }
+  .page-header p { color:var(--muted); font-size:14px; max-width:720px; margin:6px 0 0; }
+  .section-title { color:var(--ink); font-size:16px; font-weight:600; margin:0 0 14px; }
+  .section-subtitle { color:var(--muted); font-size:13px; margin-top:-10px; margin-bottom:12px; }
 
   /* Cards and metrics */
-  .metric-grid { display:flex; gap:1rem; margin-bottom:1.5rem; overflow-x:auto; padding-bottom:.2rem; scrollbar-width:thin; scroll-snap-type:x proximity; }
-  .metric-card { min-width:176px; min-height:116px; flex:1 1 0; scroll-snap-align:start; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:1rem; box-shadow:var(--shadow); }
-  .metric-top { display:flex; justify-content:space-between; align-items:center; gap:.5rem; }
-  .metric-label { color:#94a3b8; font-size:.62rem; font-weight:720; letter-spacing:.08em; text-transform:uppercase; }
-  .metric-icon { color:var(--blue); font-size:.82rem; font-weight:800; }
-  .metric-value { color:var(--ink); font-size:1.7rem; font-weight:760; letter-spacing:-.045em; line-height:1; margin-top:.72rem; }
-  .metric-note { color:#94a3b8; font-size:.64rem; margin-top:.44rem; }
-  .metric-note.positive { color:var(--green); font-weight:650; }
-  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:1.2rem; box-shadow:var(--shadow); margin-bottom:1rem; }
-  .panel-kicker { color:#94a3b8; font-size:.61rem; font-weight:760; letter-spacing:.13em; text-transform:uppercase; margin-bottom:1.05rem; }
-  .dashboard-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem; }
+  .metric-grid { display:flex; gap:16px; margin-bottom:24px; overflow-x:auto; padding-bottom:3px; scrollbar-width:thin; scroll-snap-type:x proximity; }
+  .metric-card { min-width:176px; min-height:116px; flex:1 1 0; scroll-snap-align:start; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card); padding:16px; }
+  .metric-top { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .metric-label { color:var(--muted); font-size:13px; font-weight:500; }
+  .metric-icon { color:var(--blue); }
+  .metric-value { color:var(--ink); font-size:28px; font-weight:700; letter-spacing:-.02em; line-height:1; margin-top:12px; font-variant-numeric:tabular-nums; }
+  .metric-note { color:var(--muted); font-size:12px; margin-top:8px; }
+  .metric-note.positive { color:var(--status-approved-fg); font-weight:500; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card); padding:20px; margin-bottom:16px; }
+  .panel-kicker { color:var(--ink); font-size:16px; font-weight:600; margin-bottom:16px; }
+  .dashboard-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:24px; }
   .dashboard-grid .panel { min-height:320px; margin:0; }
-  .stacked-bar { display:flex; height:9px; overflow:hidden; border-radius:999px; background:#eef2f6; margin:.25rem 0 1rem; }
+  .stacked-bar { display:flex; height:10px; overflow:hidden; border-radius:var(--radius-chip); background:var(--line-soft); margin:4px 0 16px; }
   .stacked-segment { min-width:3px; height:100%; }
-  .outcome-row { display:grid; grid-template-columns:minmax(108px,1fr) 2fr auto; gap:.75rem; align-items:center; min-height:2.1rem; }
-  .outcome-name { display:flex; align-items:center; gap:.48rem; color:#334155; font-size:.72rem; }
-  .outcome-dot { width:7px; height:7px; flex:0 0 7px; border-radius:50%; }
-  .outcome-track { height:6px; overflow:hidden; border-radius:999px; background:#f1f5f9; }
-  .outcome-fill { height:100%; border-radius:999px; }
-  .outcome-value { color:#334155; font-size:.69rem; font-variant-numeric:tabular-nums; white-space:nowrap; }
-  .outcome-value em { color:#94a3b8; font-style:normal; }
-  .breakdown-row { display:flex; justify-content:space-between; align-items:center; gap:1rem; min-height:2.55rem; border-bottom:1px solid #eef2f6; color:#334155; font-size:.72rem; }
+  .outcome-row { display:grid; grid-template-columns:minmax(108px,1fr) 2fr auto; gap:12px; align-items:center; min-height:34px; }
+  .outcome-name { display:flex; align-items:center; gap:8px; color:var(--ink-2); font-size:13px; }
+  .outcome-dot { width:8px; height:8px; flex:0 0 8px; border-radius:50%; }
+  .outcome-track { height:6px; overflow:hidden; border-radius:var(--radius-chip); background:var(--line-soft); }
+  .outcome-fill { height:100%; border-radius:var(--radius-chip); }
+  .outcome-value { color:var(--ink-2); font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .outcome-value em { color:var(--muted); font-style:normal; }
+  .breakdown-row { display:flex; justify-content:space-between; align-items:center; gap:16px; min-height:40px; border-bottom:1px solid var(--line-soft); color:var(--ink-2); font-size:13px; }
   .breakdown-row:last-child { border-bottom:0; }
-  .count-chip { display:grid; place-items:center; min-width:26px; height:22px; padding:0 .36rem; border-radius:6px; background:var(--blue-soft); color:var(--blue); font-size:.65rem; font-weight:760; }
+  .count-chip { display:grid; place-items:center; min-width:26px; height:22px; padding:0 6px; border-radius:6px; background:var(--blue-soft); color:var(--link); font-size:12px; font-weight:600; }
   .case-table-wrap { overflow-x:auto; }
   .case-table { width:100%; border-collapse:collapse; table-layout:fixed; }
-  .case-table th { color:#94a3b8; font-size:.58rem; font-weight:760; letter-spacing:.09em; text-align:left; text-transform:uppercase; padding:0 .55rem .7rem; border-bottom:1px solid var(--line); }
-  .case-table td { color:#475569; font-size:.67rem; padding:.67rem .55rem; border-bottom:1px solid #eef2f6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .case-table th { color:var(--muted); font-size:12px; font-weight:600; letter-spacing:.04em; text-align:left; text-transform:uppercase; padding:0 8px 10px; border-bottom:1px solid var(--line); }
+  .case-table td { color:var(--ink-2); font-size:13px; padding:10px 8px; border-bottom:1px solid var(--line-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .case-table tbody tr:last-child td { border-bottom:0; }
-  .case-table .case-link { color:var(--blue); font-weight:720; }
-  .case-table .money { color:#0f172a; font-variant-numeric:tabular-nums; }
-  .case-table .status-pill { transform:scale(.9); transform-origin:left center; }
-  .architecture-label { color:#94a3b8; font-size:.61rem; font-weight:760; letter-spacing:.13em; text-transform:uppercase; margin:.1rem 0 .8rem; }
-  .architecture-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
+  .case-table .case-link { color:var(--link); font-family:var(--mono); font-size:12px; }
+  .case-table .money { color:var(--ink); font-variant-numeric:tabular-nums; font-weight:500; }
+  .architecture-label { color:var(--muted); font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; margin:2px 0 12px; }
+  .architecture-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
   .architecture-grid .panel { min-height:145px; margin:0; }
-  .architecture-icon { display:grid; place-items:center; width:28px; height:28px; margin-bottom:.65rem; border-radius:8px; background:var(--blue-soft); color:var(--blue); font-size:.72rem; font-weight:800; }
-  .architecture-meta { color:var(--blue); font-size:.65rem; font-weight:700; margin-top:.7rem; }
-  .empty-mini { color:#98a2b3; font-size:.8rem; padding:.75rem 0 .25rem; }
+  .architecture-icon { display:grid; place-items:center; width:32px; height:32px; margin-bottom:10px; border-radius:var(--radius-control); background:var(--blue-soft); color:var(--blue); }
+  .architecture-meta { color:var(--link); font-size:12px; font-weight:600; margin-top:10px; }
+  .empty-mini { color:var(--muted); font-size:13px; padding:12px 0 4px; }
 
   /* Status */
-  .status-pill { display:inline-flex; align-items:center; gap:.34rem; width:max-content; border-radius:999px; padding:.28rem .52rem; font-size:.65rem; font-weight:760; letter-spacing:.02em; text-transform:uppercase; }
-  .status-pill:before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
-  .status-completed, .status-approve { background:var(--green-soft); color:var(--green); }
-  .status-pending, .status-pending-review, .status-escalate { background:var(--amber-soft); color:var(--amber); }
-  .status-reject { background:var(--red-soft); color:var(--red); }
-  .status-request-info { background:var(--blue-soft); color:var(--blue); }
+  .status-pill { display:inline-flex; align-items:center; gap:6px; width:max-content; border-radius:var(--radius-chip); padding:3px 10px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .status-pill:before { content:""; width:7px; height:7px; border-radius:50%; background:var(--pill-dot, currentColor); }
+  .status-review, .status-escalated, .status-recovery { background:var(--status-review-bg); color:var(--status-review-fg); --pill-dot:var(--status-review-dot); }
+  .status-approved { background:var(--status-approved-bg); color:var(--status-approved-fg); --pill-dot:var(--status-approved-dot); }
+  .status-rejected { background:var(--status-rejected-bg); color:var(--status-rejected-fg); --pill-dot:var(--status-rejected-dot); }
+  .status-request-info { background:var(--status-request-info-bg); color:var(--status-request-info-fg); --pill-dot:var(--status-request-info-dot); }
+  .status-processing { background:var(--status-processing-bg); color:var(--status-processing-fg); --pill-dot:var(--status-processing-dot); }
 
   /* Case detail */
-  .case-hero { position:relative; overflow:hidden; border-radius:16px; padding:1.25rem 1.35rem; margin:.25rem 0 1rem; background:linear-gradient(125deg,#111f3c 0%,#172b51 68%,#1e3d72 100%); box-shadow:0 12px 30px rgba(13,24,48,.17); }
+  .case-hero { position:relative; overflow:hidden; border-radius:16px; padding:20px 22px; margin:4px 0 16px; background:linear-gradient(125deg,#111f3c 0%,#172b51 68%,#1e3d72 100%); }
   .case-hero:after { content:""; position:absolute; width:220px; height:220px; border-radius:50%; right:-80px; top:-120px; background:rgba(74,133,255,.15); }
-  .case-kicker { color:#8fa9d1; font-size:.66rem; letter-spacing:.11em; text-transform:uppercase; }
-  .case-title { color:white; font-size:1.3rem; font-weight:720; letter-spacing:-.025em; margin:.3rem 0 .72rem; }
-  .case-meta { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; color:#b8c6db; font-size:.75rem; }
-  .case-summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin-bottom:1.1rem; }
-  .summary-card { background:white; border:1px solid var(--line); border-radius:12px; padding:.82rem .9rem; }
-  .summary-label { color:#98a2b3; font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; }
-  .summary-value { color:var(--ink); font-size:.89rem; font-weight:680; margin-top:.32rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .timeline { margin:.55rem 0 1rem; }
-  .stage { position:relative; margin-left:.78rem; padding:0 0 1.12rem 1.65rem; border-left:1px solid #dce3ed; }
-  .stage:last-child { border-left-color:transparent; padding-bottom:.2rem; }
-  .stage-dot { position:absolute; left:-.55rem; top:0; display:grid; place-items:center; width:1.05rem; height:1.05rem; border-radius:50%; background:var(--green); color:white; border:3px solid white; box-shadow:0 0 0 1px #c8d7d0; font-size:.5rem; }
-  .stage-dot.warn { background:var(--amber); box-shadow:0 0 0 1px #e5c99f; }
-  .stage-title { color:#344054; font-size:.81rem; font-weight:680; line-height:1.25; }
-  .stage-detail { color:#98a2b3; font-size:.72rem; margin-top:.2rem; }
-  .guardrail { display:flex; align-items:flex-start; gap:.72rem; background:var(--amber-soft); border:1px solid #f0d39f; border-radius:12px; padding:.85rem .95rem; margin:.9rem 0; color:#6e4708; font-size:.78rem; }
-  .guardrail-mark { display:grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:7px; background:#f4d69d; color:#7c4a00; font-weight:800; }
-  .discrepancy { border:1px solid var(--line); border-radius:11px; padding:.8rem .9rem; margin:.55rem 0; background:white; }
-  .discrepancy-head { display:flex; justify-content:space-between; gap:.75rem; align-items:center; }
-  .discrepancy-type { color:#344054; font-size:.79rem; font-weight:700; }
-  .discrepancy-copy { color:#667085; font-size:.75rem; line-height:1.5; margin-top:.42rem; }
-  .severity-high { color:var(--red); background:var(--red-soft); }
-  .severity-medium { color:var(--amber); background:var(--amber-soft); }
-  .severity-low { color:var(--blue); background:var(--blue-soft); }
-  .severity-chip { border-radius:999px; padding:.22rem .45rem; font-size:.6rem; font-weight:760; text-transform:uppercase; }
-  .decision-card { background:white; border:1px solid var(--line); border-radius:12px; padding:.95rem 1rem; margin:.7rem 0; }
-  .decision-label { color:#98a2b3; font-size:.66rem; text-transform:uppercase; letter-spacing:.09em; }
-  .decision-title { color:var(--ink); font-size:.92rem; font-weight:720; margin:.35rem 0; }
-  .decision-copy { color:#667085; font-size:.79rem; line-height:1.55; }
-  .request-copy { background:#f6f8fb; border:1px solid #e4e9f1; border-radius:9px; color:#475467; padding:.7rem .8rem; margin-top:.7rem; font: .73rem/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; }
-  .audit-row { display:grid; grid-template-columns:12px 1fr; gap:.75rem; padding:.1rem 0 .95rem; }
-  .audit-node { width:8px; height:8px; border-radius:50%; background:var(--blue); margin-top:.31rem; box-shadow:0 0 0 4px var(--blue-soft); }
-  .audit-title { color:#344054; font-size:.79rem; font-weight:680; }
-  .audit-meta { color:#98a2b3; font-size:.68rem; margin-top:.15rem; }
+  .case-kicker { color:var(--sidebar-muted); font-size:12px; letter-spacing:.1em; text-transform:uppercase; }
+  .case-title { color:#ffffff; font-size:20px; font-weight:700; letter-spacing:-.01em; margin:4px 0 12px; font-family:var(--mono); }
+  .case-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; color:var(--sidebar-text); font-size:13px; }
+  .case-summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+  .summary-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card); padding:12px 14px; }
+  .summary-label { color:var(--muted); font-size:12px; }
+  .summary-value { color:var(--ink); font-size:14px; font-weight:600; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .timeline { margin:8px 0 16px; }
+  .stage { position:relative; margin-left:12px; padding:0 0 18px 26px; border-left:1px solid var(--line); }
+  .stage:last-child { border-left-color:transparent; padding-bottom:3px; }
+  .stage-dot { position:absolute; left:-10px; top:0; display:grid; place-items:center; width:20px; height:20px; border-radius:50%; background:var(--status-approved-dot); color:#ffffff; border:3px solid var(--surface); }
+  .stage-dot .p2p-icon { font-size:12px; font-weight:700; }
+  .stage-dot.warn { background:var(--status-review-dot); }
+  .stage-title { color:var(--ink); font-size:14px; font-weight:600; line-height:1.3; }
+  .stage-detail { color:var(--muted); font-size:13px; margin-top:3px; }
+  .guardrail { display:flex; align-items:flex-start; gap:12px; background:var(--status-review-bg); border:1px solid #f0d39f; border-radius:var(--radius-card); padding:14px 16px; margin:14px 0; color:var(--status-review-fg); font-size:13px; }
+  .guardrail ul { margin:4px 0 0; padding-left:18px; }
+  .guardrail li { margin:2px 0; }
+  .guardrail-mark { display:grid; place-items:center; width:28px; height:28px; flex:0 0 28px; border-radius:var(--radius-control); background:#f4d69d; color:var(--status-review-fg); }
+  .discrepancy { border:1px solid var(--line); border-radius:var(--radius-card); padding:12px 14px; margin:8px 0; background:var(--surface); }
+  .discrepancy-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+  .discrepancy-type { color:var(--ink); font-size:14px; font-weight:600; }
+  .discrepancy-copy { color:var(--ink-2); font-size:13px; line-height:1.5; margin-top:6px; }
+  .severity-chip { border-radius:var(--radius-chip); padding:2px 8px; font-size:12px; font-weight:600; text-transform:uppercase; }
+  .severity-critical { color:var(--sev-critical-fg); background:var(--sev-critical-bg); }
+  .severity-material { color:var(--sev-material-fg); background:var(--sev-material-bg); }
+  .severity-warning { color:var(--sev-warning-fg); background:var(--sev-warning-bg); }
+  .severity-info { color:var(--sev-info-fg); background:var(--sev-info-bg); }
+  .decision-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-card); padding:16px; margin:12px 0; }
+  .decision-label { color:var(--muted); font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+  .decision-title { color:var(--ink); font-size:16px; font-weight:600; margin:6px 0; }
+  .decision-copy { color:var(--ink-2); font-size:13px; line-height:1.55; }
+  .request-copy { background:var(--surface-subtle); border:1px solid var(--line); border-radius:var(--radius-control); color:var(--ink-2); padding:10px 12px; margin-top:10px; font: 12px/1.5 var(--mono); white-space:pre-wrap; }
+  .audit-row { display:grid; grid-template-columns:12px 1fr; gap:12px; padding:2px 0 14px; }
+  .audit-node { width:8px; height:8px; border-radius:50%; background:var(--blue); margin-top:5px; box-shadow:0 0 0 4px var(--blue-soft); }
+  .audit-title { color:var(--ink); font-size:14px; font-weight:600; }
+  .audit-meta { color:var(--muted); font-size:12px; margin-top:2px; }
+  .field-errors { display:grid; grid-template-columns:minmax(120px,auto) 1fr; gap:6px 16px; margin:4px 0 12px; padding:12px 14px; border:1px solid #f3c3cc; border-radius:var(--radius-control); background:var(--surface); font-size:13px; }
+  .field-errors code { font-family:var(--mono); font-size:12px; color:var(--sev-critical-fg); background:none; padding:0; }
+  .field-errors span { color:var(--ink-2); }
 
   /* Empty states and workflow controls */
-  .empty-state { text-align:center; border:1px dashed #cfd7e3; border-radius:14px; padding:2.2rem 1rem; background:rgba(255,255,255,.58); }
-  .empty-icon { display:grid; place-items:center; width:42px; height:42px; margin:0 auto .8rem; border-radius:12px; color:var(--blue); background:var(--blue-soft); font-weight:800; }
-  .empty-title { color:var(--ink); font-size:.95rem; font-weight:700; }
-  .empty-copy { color:var(--muted); font-size:.78rem; margin-top:.35rem; }
-  .st-key-invoice-workflow-stepper { margin:-.25rem 0 1.1rem; }
+  .empty-state { text-align:center; border:1px dashed #cfd5de; border-radius:var(--radius-card); padding:36px 16px; background:rgba(255,255,255,.58); }
+  .empty-icon { display:grid; place-items:center; width:44px; height:44px; margin:0 auto 12px; border-radius:var(--radius-card); color:var(--blue); background:var(--blue-soft); }
+  .empty-title { color:var(--ink); font-size:16px; font-weight:600; }
+  .empty-copy { color:var(--muted); font-size:14px; margin-top:6px; }
+  .st-key-invoice-workflow-stepper { margin:-4px 0 18px; }
   .st-key-invoice-workflow-stepper [data-testid="stRadio"] > label { display:none; }
   .st-key-invoice-workflow-stepper div[role="radiogroup"] {
-    display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.55rem;
+    display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;
   }
   .st-key-invoice-workflow-stepper div[role="radiogroup"] > label {
-    display:flex; justify-content:center; min-height:2.55rem; padding:.58rem .75rem;
-    border:1px solid var(--line); border-radius:9px; background:white;
-    color:#64748b; font-size:.7rem; font-weight:700;
+    display:flex; justify-content:center; min-height:40px; padding:9px 12px;
+    border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface);
+    color:var(--muted); font-size:13px; font-weight:600;
   }
   .st-key-invoice-workflow-stepper div[role="radiogroup"] > label > div:first-child { display:none; }
   .st-key-invoice-workflow-stepper div[role="radiogroup"] > label:has(input:checked) {
-    border-color:var(--blue); background:var(--blue-soft); color:var(--blue);
-    box-shadow:inset 0 0 0 1px rgba(49,91,234,.12);
+    border-color:var(--blue); background:var(--blue-soft); color:var(--link);
   }
-  div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); border-radius:var(--radius); box-shadow:var(--shadow); background:white; }
+  div[data-testid="stVerticalBlockBorderWrapper"] { border-color:var(--line); border-radius:var(--radius-card); background:var(--surface); }
 
   /* Streamlit components */
-  .stTabs [data-baseweb="tab-list"] { gap:.25rem; border-bottom:1px solid var(--line); }
-  .stTabs [data-baseweb="tab"] { color:#667085; height:2.7rem; padding:0 .8rem; font-size:.78rem; }
-  .stTabs [aria-selected="true"] { color:var(--blue) !important; }
+  .stTabs [data-baseweb="tab-list"] { gap:4px; border-bottom:1px solid var(--line); }
+  .stTabs [data-baseweb="tab"] { color:var(--ink-2); height:42px; padding:0 12px; font-size:14px; }
+  .stTabs [aria-selected="true"] { color:var(--ink) !important; font-weight:600; }
   .stTabs [data-baseweb="tab-highlight"] { background-color:var(--blue); }
-  .stButton > button { border-radius:9px; min-height:2.55rem; font-weight:680; }
-  .stButton > button[kind="primary"] { background:var(--blue); border-color:var(--blue); box-shadow:0 5px 14px rgba(47,111,237,.2); }
-  .stButton > button[kind="primary"]:hover { background:#245fd3; border-color:#245fd3; }
-  [data-baseweb="select"] > div, [data-baseweb="input"] > div, textarea { border-radius:9px !important; }
+  .stButton > button { border-radius:var(--radius-control); min-height:40px; font-weight:500; }
   [data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:10px; overflow:hidden; }
   [data-testid="stAlert"] { border-radius:10px; }
   summary:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, [role="tab"]:focus-visible { outline:3px solid rgba(47,111,237,.3) !important; outline-offset:2px; }
@@ -245,38 +260,37 @@ UI_STYLES = """
   @media (max-width: 700px) {
     [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display:none !important; }
     .block-container { padding:3.65rem .75rem 3rem; }
-    .st-key-mobile-navigation { display:block; margin:-.35rem 0 .9rem; }
+    .st-key-mobile-navigation { display:block; margin:-6px 0 14px; }
     .st-key-mobile-navigation [data-testid="stRadio"] > label { display:none; }
-    .st-key-mobile-navigation div[role="radiogroup"] { display:flex; flex-wrap:nowrap; gap:.35rem; overflow-x:auto; padding:.15rem 0 .25rem; scrollbar-width:none; }
+    .st-key-mobile-navigation div[role="radiogroup"] { display:flex; flex-wrap:nowrap; gap:6px; overflow-x:auto; padding:2px 0 4px; scrollbar-width:none; }
     .st-key-mobile-navigation div[role="radiogroup"]::-webkit-scrollbar { display:none; }
-    .st-key-mobile-navigation div[role="radiogroup"] > label { flex:0 0 auto; min-height:2rem; padding:.4rem .68rem; border:1px solid var(--line); border-radius:8px; background:white; color:#64748b; font-size:.68rem; font-weight:650; }
+    .st-key-mobile-navigation div[role="radiogroup"] > label { flex:0 0 auto; min-height:32px; padding:6px 11px; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface); color:var(--muted); font-size:13px; font-weight:500; }
     .st-key-mobile-navigation div[role="radiogroup"] > label > div:first-child { display:none; }
-    .st-key-mobile-navigation div[role="radiogroup"] > label:has(input:checked) { border-color:var(--blue); background:var(--blue); color:white; }
-    .st-key-mobile-navigation div[role="radiogroup"] > label:has(input:checked) * { color:white !important; }
-    .topbar { margin-bottom:1rem; }
-    .breadcrumb, .topbar-update { display:none; }
-    .topbar-right { width:100%; justify-content:space-between; }
+    .st-key-mobile-navigation div[role="radiogroup"] > label:has(input:checked) { border-color:var(--blue); background:var(--blue); color:#ffffff; }
+    .st-key-mobile-navigation div[role="radiogroup"] > label:has(input:checked) * { color:#ffffff !important; }
+    .topbar { margin-bottom:16px; }
+    .breadcrumb { display:none; }
+    .topbar-right { width:100%; justify-content:flex-end; }
     .page-header { display:block; }
-    .page-header h1 { max-width:330px; }
     .metric-grid { margin-right:-.75rem; padding-right:.75rem; }
     .metric-card { min-width:176px; min-height:105px; }
-    .dashboard-grid { gap:1rem; }
+    .dashboard-grid { gap:16px; }
     .dashboard-grid .panel { min-height:auto; }
-    .outcome-row { grid-template-columns:105px 1fr auto; gap:.45rem; }
-    .st-key-invoice-workflow-stepper div[role="radiogroup"] { gap:.35rem; }
-    .st-key-invoice-workflow-stepper div[role="radiogroup"] > label { padding:.5rem .35rem; }
+    .outcome-row { grid-template-columns:105px 1fr auto; gap:8px; }
+    .st-key-invoice-workflow-stepper div[role="radiogroup"] { gap:6px; }
+    .st-key-invoice-workflow-stepper div[role="radiogroup"] > label { padding:8px 6px; }
     .architecture-grid { grid-template-columns:1fr; }
     .case-table { min-width:520px; }
     .case-table th:nth-child(4), .case-table td:nth-child(4),
     .case-table th:nth-child(5), .case-table td:nth-child(5),
     .case-table th:nth-child(6), .case-table td:nth-child(6) { display:none; }
     .case-summary-grid { grid-template-columns:1fr 1fr; }
+    .field-errors { grid-template-columns:1fr; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *:before, *:after { scroll-behavior:auto !important; transition:none !important; animation:none !important; }
   }
 </style>
-<span class="ui-style-anchor" aria-hidden="true"></span>
 """
 
 
@@ -295,42 +309,27 @@ def h(value: object) -> str:
     return escape(str(value), quote=True)
 
 
-def DecimalDisplay(value: object) -> str:
-    try:
-        return f"{float(value):,.2f}"
-    except (TypeError, ValueError):
-        return str(value)
+def icon(name: str) -> str:
+    return f'<span class="p2p-icon" aria-hidden="true">{h(name)}</span>'
 
 
-def label_action(action: str) -> str:
-    return {
-        "APPROVE": "Approve",
-        "REJECT": "Reject",
-        "REQUEST_INFO": "Request info",
-        "ESCALATE": "Escalate",
-    }.get(action, action.replace("_", " ").title())
+def status_pill(key: str, label: str) -> str:
+    css_key = key.replace("_", "-")
+    return f'<span class="status-pill status-{h(css_key)}">{h(label)}</span>'
 
 
-def status_class(value: str) -> str:
-    return value.lower().replace("_", "-")
-
-
-def status_pill(value: str, label: str | None = None) -> str:
-    return (
-        f'<span class="status-pill status-{h(status_class(value))}">'
-        f"{h(label or label_action(value))}</span>"
-    )
+def action_pill(action: str) -> str:
+    return status_pill(ACTION_STATUS_KEYS.get(action, "processing"), label_action(action))
 
 
 def top_bar(page: str) -> None:
+    reviewer = current_reviewer()
     render_html(
         f"""
         <div class="topbar">
           <div class="breadcrumb">Operations / <strong>{h(page)}</strong></div>
           <div class="topbar-right">
-            <span class="system-health"><i></i>System healthy</span>
-            <span class="topbar-update">Local control plane · ready</span>
-            <span class="operator-avatar" aria-label="P2P operator">P2P</span>
+            <span class="operator-avatar" title="{h(reviewer)}" aria-label="Reviewer {h(reviewer)}">{h(initials(reviewer))}</span>
           </div>
         </div>
         """,
@@ -355,12 +354,12 @@ def metric_card(
     label: str,
     value: object,
     note: str,
-    icon: str,
+    icon_name: str,
     note_tone: str = "",
 ) -> str:
     return f"""
       <div class="metric-card">
-        <div class="metric-top"><span class="metric-label">{h(label)}</span><span class="metric-icon">{h(icon)}</span></div>
+        <div class="metric-top"><span class="metric-label">{h(label)}</span><span class="metric-icon">{icon(icon_name)}</span></div>
         <div class="metric-value">{h(value)}</div>
         <div class="metric-note {h(note_tone)}">{h(note)}</div>
       </div>
@@ -369,18 +368,18 @@ def metric_card(
 
 def render_dashboard_analysis(metrics: dict) -> None:
     palette = {
-        "APPROVE": ("#315bea", "Approved"),
-        "REJECT": ("#dc3545", "Rejected"),
-        "REQUEST_INFO": ("#ee9b18", "Information requested"),
-        "ESCALATE": ("#94a3b8", "Escalated"),
-        "UNKNOWN": ("#cbd5e1", "Other"),
+        "APPROVE": "#1f9a5e",
+        "REJECT": "#d23a50",
+        "REQUEST_INFO": "#2f6fed",
+        "ESCALATE": "#c98512",
     }
     actions = metrics.get("actions", {})
     total_actions = sum(actions.values())
     segments = []
     outcome_rows = []
     for action, count in sorted(actions.items(), key=lambda item: item[1], reverse=True):
-        color, label = palette.get(action, palette["UNKNOWN"])
+        color = palette.get(action, "#cfd5de")
+        label = OUTCOME_LABELS.get(action, "Other")
         percent = count / total_actions * 100 if total_actions else 0
         segments.append(
             f'<span class="stacked-segment" style="width:{percent:.1f}%;background:{color}"></span>'
@@ -406,7 +405,7 @@ def render_dashboard_analysis(metrics: dict) -> None:
         exception_rows.append(
             f"""
             <div class="breakdown-row">
-              <span>{h(exception.replace("_", " ").title())}</span>
+              <span>{h(label_exception(exception))}</span>
               <span class="count-chip">{h(count)}</span>
             </div>
             """
@@ -450,41 +449,26 @@ def relative_age(value: str | None) -> str:
     return f"{seconds // 86400}d"
 
 
-def case_status(case: dict) -> tuple[str, str, str]:
-    if case.get("status") == "PENDING_REVIEW":
-        return "PENDING_REVIEW", "Human review", "Review queue"
-    outcome = case.get("state", {}).get("outcome", {})
-    action = outcome.get("action", "COMPLETED")
-    source = outcome.get("source", "AUTONOMOUS")
-    if action == "APPROVE":
-        label = "Auto-resolved" if source == "AUTONOMOUS" else "Approved"
-    elif action == "REJECT":
-        label = "Blocked"
-    else:
-        label = label_action(action)
-    assigned = "Human reviewer" if str(source).startswith("HUMAN") else "System"
-    return action, label, assigned
-
-
 def render_recent_cases(cases: list[dict]) -> None:
     rows = []
     for case in cases[:6]:
         invoice = case.get("invoice", {})
         discrepancies = case.get("state", {}).get("match_result", {}).get("discrepancies", [])
-        exception = (
-            discrepancies[0].get("type", "Exception").replace("_", " ").title()
-            if discrepancies
-            else "Exact match"
-        )
-        status_value, status_label, assigned = case_status(case)
+        exception = label_exception(discrepancies[0].get("type") if discrepancies else None)
+        status = display_status(case)
+        source = (case.get("state", {}).get("outcome") or {}).get("source", "")
+        if case.get("status") == "PENDING_REVIEW":
+            assigned = "Review queue"
+        else:
+            assigned = "Human reviewer" if str(source).startswith("HUMAN") else "System"
         rows.append(
             f"""
             <tr>
               <td class="case-link">{h(case.get("case_id", "Unknown"))}</td>
               <td>{h(invoice.get("supplier_name", "Unknown supplier"))}</td>
-              <td class="money">{h(invoice.get("currency", ""))} {h(DecimalDisplay(invoice.get("total", 0)))}</td>
+              <td class="money">{h(format_money(invoice.get("total", 0), invoice.get("currency", "")))}</td>
               <td>{h(exception)}</td>
-              <td>{status_pill(status_value, status_label)}</td>
+              <td>{status_pill(status.key, status.label)}</td>
               <td>{h(assigned)}</td>
               <td>{h(relative_age(case.get("updated_at")))}</td>
             </tr>
@@ -519,12 +503,12 @@ def render_discrepancies(state: dict) -> None:
         st.success("No discrepancies — exact three-way match")
         return
     for item in discrepancies:
-        severity = str(item.get("severity", "medium")).lower()
+        severity = str(item.get("severity", "info")).lower()
         render_html(
             f"""
             <div class="discrepancy">
               <div class="discrepancy-head">
-                <div class="discrepancy-type">{h(str(item.get("type", "exception")).replace("_", " ").title())}</div>
+                <div class="discrepancy-type">{h(label_exception(item.get("type")))}</div>
                 <span class="severity-chip severity-{h(severity)}">{h(severity)}</span>
               </div>
               <div class="discrepancy-copy">{h(item.get("explanation", "No explanation provided."))}</div>
@@ -535,7 +519,7 @@ def render_discrepancies(state: dict) -> None:
 
 def stage(title: str, detail: str, warning: bool = False) -> str:
     warning_class = " warn" if warning else ""
-    marker = "!" if warning else "✓"
+    marker = icon("priority_high" if warning else "check")
     return f"""
       <div class="stage">
         <span class="stage-dot{warning_class}">{marker}</span>
@@ -552,14 +536,14 @@ def render_case(case: dict) -> None:
 
     state = case["state"]
     invoice = case["invoice"]
-    case_status = case["status"]
+    status = display_status(case)
     render_html(
         f"""
         <div class="case-hero">
           <div class="case-kicker">Exception case</div>
           <div class="case-title">{h(case["case_id"])}</div>
           <div class="case-meta">
-            {status_pill(case_status, case_status.replace("_", " ").title())}
+            {status_pill(status.key, status.label)}
             <span>{h(invoice["supplier_name"])}</span><span>·</span><span>{h(invoice["invoice_id"])}</span>
           </div>
         </div>
@@ -567,7 +551,7 @@ def render_case(case: dict) -> None:
           <div class="summary-card"><div class="summary-label">Invoice</div><div class="summary-value">{h(invoice["invoice_id"])}</div></div>
           <div class="summary-card"><div class="summary-label">Supplier</div><div class="summary-value" title="{h(invoice["supplier_name"])}">{h(invoice["supplier_name"])}</div></div>
           <div class="summary-card"><div class="summary-label">Purchase order</div><div class="summary-value">{h(invoice.get("po_number") or "Missing")}</div></div>
-          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(invoice["currency"])} {h(DecimalDisplay(invoice["total"]))}</div></div>
+          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(format_money(invoice["total"], invoice["currency"]))}</div></div>
         </div>
         """,
     )
@@ -618,15 +602,15 @@ def render_case(case: dict) -> None:
         render_discrepancies(state)
         policy = state.get("policy_result")
         if policy:
-            reasons = "; ".join(policy["reasons"])
+            reasons = "".join(f"<li>{h(reason)}</li>" for reason in policy["reasons"])
             verdict = (
                 "Autonomous action permitted" if policy["permitted"] else "Human review required"
             )
             render_html(
                 f"""
                 <div class="guardrail">
-                  <div class="guardrail-mark">◇</div>
-                  <div><strong>Deterministic policy · {h(verdict)}</strong><br>{h(reasons)}</div>
+                  <div class="guardrail-mark">{icon("policy")}</div>
+                  <div><strong>Deterministic policy · {h(verdict)}</strong><ul>{reasons}</ul></div>
                 </div>
                 """,
             )
@@ -657,7 +641,7 @@ def render_case(case: dict) -> None:
                 f"""
                 <div class="decision-card">
                   <div class="decision-label">Proposed resolution</div>
-                  <div class="decision-title">{status_pill(resolution["action"])}</div>
+                  <div class="decision-title">{action_pill(resolution["action"])}</div>
                   <div class="decision-copy">{h(resolution["rationale"])}</div>
                   {f'<div class="request-copy">{h(request)}</div>' if request else ""}
                 </div>
@@ -692,7 +676,7 @@ def render_case(case: dict) -> None:
                 f"""
                 <div class="decision-card">
                   <div class="decision-label">Final outcome · {h(outcome["source"].replace("_", " ").title())}</div>
-                  <div class="decision-title">{status_pill(outcome["action"])}</div>
+                  <div class="decision-title">{action_pill(outcome["action"])}</div>
                   <div class="decision-copy">{h(outcome["rationale"])}</div>
                 </div>
                 """,
@@ -707,7 +691,7 @@ def render_case(case: dict) -> None:
                 <div class="audit-row">
                   <div class="audit-node"></div>
                   <div>
-                    <div class="audit-title">{h(event["event_type"].replace("_", " ").title())}</div>
+                    <div class="audit-title">{h(label_event(event["event_type"]))}</div>
                     <div class="audit-meta">{h(event["timestamp"])} · {h(event["actor"])}</div>
                   </div>
                 </div>
@@ -726,51 +710,50 @@ def dashboard(app: CaseService) -> None:
     )
     metrics = app.metrics()
     cases = app.list_cases()
-    escalated = sum(
-        1
-        for case in cases
-        if case.get("state", {}).get("resolution", {}).get("action") == "ESCALATE"
-    )
     render_html(
         '<div class="metric-grid">'
-        + metric_card("Invoices processed", metrics["total"], "All workflow runs", "▣")
+        + metric_card("Invoices processed", metrics["total"], "All workflow runs", "receipt_long")
         + metric_card(
             "Auto-resolved",
             f"{metrics['autonomous_rate']:.1%}",
             "Policy-authorized outcomes",
-            "✓",
+            "verified",
             "positive",
         )
-        + metric_card("Exceptions open", metrics["pending"], "Awaiting a reviewer", "△")
+        + metric_card(
+            "Awaiting review",
+            metrics["counts_by_status"].get("PENDING_REVIEW", 0),
+            "Awaiting a reviewer",
+            "pending_actions",
+        )
         + metric_card(
             "Avg confidence",
             f"{metrics['average_confidence']:.0%}",
             "Across AI proposals",
-            "◎",
+            "speed",
         )
-        + metric_card("Escalated", escalated, "Model or policy escalation", "↗")
         + "</div>",
     )
     render_dashboard_analysis(metrics)
     render_recent_cases(cases)
     render_html(
-        """
+        f"""
         <div class="architecture-label">Control architecture</div>
         <div class="architecture-grid">
           <article class="panel">
-            <div class="architecture-icon">▤</div>
+            <div class="architecture-icon">{icon("database")}</div>
             <div class="decision-title">Evidence Engine</div>
             <div class="decision-copy">Validated invoices, purchase orders, receipts, supplier records, and duplicate history establish the factual record.</div>
             <div class="architecture-meta">Deterministic inputs</div>
           </article>
           <article class="panel">
-            <div class="architecture-icon">⌘</div>
+            <div class="architecture-icon">{icon("psychology")}</div>
             <div class="decision-title">Reasoning Engine</div>
             <div class="decision-copy">Investigation, resolution, and critique use typed outputs inside a bounded revision loop.</div>
             <div class="architecture-meta">3 structured AI roles</div>
           </article>
           <article class="panel">
-            <div class="architecture-icon">◇</div>
+            <div class="architecture-icon">{icon("gavel")}</div>
             <div class="decision-title">Authority Framework</div>
             <div class="decision-copy">Deterministic policy either finalizes the case or pauses the workflow for a human reviewer.</div>
             <div class="architecture-meta">Human-in-the-loop controls</div>
@@ -807,10 +790,22 @@ def render_validated_invoice(invoice: Invoice) -> None:
           <div class="summary-card"><div class="summary-label">Invoice</div><div class="summary-value">{h(invoice.invoice_id)}</div></div>
           <div class="summary-card"><div class="summary-label">Supplier</div><div class="summary-value" title="{h(invoice.supplier_name)}">{h(invoice.supplier_name)}</div></div>
           <div class="summary-card"><div class="summary-label">Purchase order</div><div class="summary-value">{h(invoice.po_number or "Missing")}</div></div>
-          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(invoice.currency)} {h(DecimalDisplay(invoice.total))}</div></div>
+          <div class="summary-card"><div class="summary-label">Invoice total</div><div class="summary-value">{h(format_money(invoice.total, invoice.currency))}</div></div>
         </div>
         """,
     )
+
+
+def render_field_errors(rows: list[tuple[str, str]]) -> None:
+    st.error(f"{len(rows)} field(s) need fixing before this invoice can be processed")
+    items = "".join(f"<code>{h(field)}</code><span>{h(message)}</span>" for field, message in rows)
+    render_html(f'<div class="field-errors">{items}</div>')
+
+
+def show_failure(message: str, exc: Exception) -> None:
+    st.error(message)
+    with st.expander("Technical details"):
+        st.code(f"{type(exc).__name__}: {exc}", language=None)
 
 
 def process_invoice_page(app: CaseService) -> None:
@@ -874,10 +869,9 @@ def process_invoice_page(app: CaseService) -> None:
                     queue_invoice_workflow_stage("Analyze")
                     st.rerun()
                 except ValidationError as exc:
-                    st.error(
-                        "Invoice validation failed. Correct the highlighted structure or totals."
-                    )
-                    st.code(str(exc), language=None)
+                    render_field_errors(validation_rows(exc))
+                except UnicodeDecodeError:
+                    render_field_errors([("file", "The file is not valid UTF-8 text.")])
         return
 
     invoice = st.session_state.get("invoice_workflow_invoice")
@@ -928,7 +922,11 @@ def process_invoice_page(app: CaseService) -> None:
                         queue_invoice_workflow_stage("Resolve")
                         st.rerun()
                     except Exception as exc:
-                        st.error(f"Workflow could not be completed: {type(exc).__name__}: {exc}")
+                        show_failure(
+                            "The workflow could not finish. The case is saved; "
+                            "run the same invoice again to resume.",
+                            exc,
+                        )
         return
 
     case_id = st.session_state.get("invoice_workflow_case_id")
@@ -985,8 +983,8 @@ def cases_page(app: CaseService) -> None:
     cases = app.list_cases()
     if not cases:
         render_html(
-            """
-            <div class="empty-state"><div class="empty-icon">◇</div>
+            f"""
+            <div class="empty-state"><div class="empty-icon">{icon("inbox")}</div>
               <div class="empty-title">No cases yet</div>
               <div class="empty-copy">Run an invoice workflow to create the first auditable case.</div>
             </div>
@@ -997,7 +995,7 @@ def cases_page(app: CaseService) -> None:
         "Select case",
         cases,
         format_func=lambda item: (
-            f"{item['case_id']} · {item['invoice_id']} · {item['status'].replace('_', ' ').title()}"
+            f"{item['case_id']} · {item['invoice_id']} · {display_status(item).label}"
         ),
     )
     render_case(app.get_case(selected["case_id"]) or selected)
@@ -1012,8 +1010,8 @@ def review_page(app: CaseService) -> None:
     pending = app.list_cases("PENDING_REVIEW")
     if not pending:
         render_html(
-            """
-            <div class="empty-state"><div class="empty-icon">✓</div>
+            f"""
+            <div class="empty-state"><div class="empty-icon">{icon("task_alt")}</div>
               <div class="empty-title">Queue clear</div>
               <div class="empty-copy">No cases are waiting for a human decision.</div>
             </div>
@@ -1025,7 +1023,7 @@ def review_page(app: CaseService) -> None:
         pending,
         format_func=lambda item: (
             f"{item['case_id']} · {item['invoice_id']} · "
-            f"{item['invoice']['currency']} {DecimalDisplay(item['invoice']['total'])}"
+            f"{format_money(item['invoice']['total'], item['invoice']['currency'])}"
         ),
     )
     case = app.get_case(selected["case_id"]) or selected
@@ -1051,28 +1049,48 @@ def review_page(app: CaseService) -> None:
         )
         if st.button("Submit and resume workflow", type="primary", width="stretch"):
             try:
-                result = app.review_case(
+                app.review_case(
                     selected["case_id"],
                     HumanReview(reviewer=reviewer, action=action, comment=comment or None),
                     checkpoint_id=case["checkpoint_id"],
                 )
-                st.success(f"Workflow resumed and completed: {result['state']['outcome'].action}")
-                st.rerun()
             except Exception as exc:
-                st.error(f"Review could not be applied: {type(exc).__name__}: {exc}")
+                show_failure("The review could not be applied. Reload the case and try again.", exc)
+            else:
+                remaining = len(app.list_cases("PENDING_REVIEW"))
+                st.session_state["flash"] = {
+                    "kind": "toast",
+                    "text": (
+                        f"{label_action(action)} recorded for {case['invoice_id']} · "
+                        f"{remaining} left in queue"
+                    ),
+                }
+                st.rerun()
+
+
+def render_flash() -> None:
+    flash = st.session_state.pop("flash", None)
+    if not flash:
+        return
+    if flash["kind"] == "toast":
+        st.toast(flash["text"], icon=":material/check_circle:")
+    else:
+        st.error(flash["text"])
 
 
 def main() -> None:
     app = service()
     render_html(UI_STYLES)
+    render_flash()
     active_page = st.session_state.setdefault("active_page", NAV_ITEMS[0])
     st.session_state.setdefault("desktop_navigation", active_page)
     st.session_state.setdefault("mobile_navigation", active_page)
+    runtime = app.runtime
     with st.sidebar:
         render_html(
             """
             <div class="brand">
-              <div class="brand-mark">◇</div>
+              <div class="brand-mark">P2P</div>
               <div><div class="brand-name">P2P Control</div><div class="brand-kicker">Exception operations</div></div>
             </div>
             """,
@@ -1085,21 +1103,16 @@ def main() -> None:
             args=("desktop_navigation", "mobile_navigation"),
             label_visibility="collapsed",
         )
-        mode = "Demo" if app.runtime.demo_mode else "Live"
-        model = (
-            "Mock provider" if app.runtime.demo_mode else os.getenv("OPENAI_MODEL", "Configured")
-        )
+        mode = "Demo" if runtime.demo_mode else "Live"
+        rules_name = runtime.rules_path.name if runtime.rules_path else "—"
         render_html(
             f"""
             <div class="runtime-card">
-              <div class="runtime-label">Runtime status</div>
-              <div class="runtime-value"><span class="live-dot"></span>P2P-Agent v1.0</div>
-              <div class="runtime-grid">
-                <span>Mode</span><span>{h(mode)}</span>
-                <span>Model</span><span title="{h(model)}">{h(model)}</span>
-                <span>Policy</span><span>YAML controls</span>
-                <span>State</span><span>Ready</span>
-              </div>
+              <div class="runtime-label">Runtime</div>
+              <div class="runtime-row"><span>Mode</span><span>{h(mode)}</span></div>
+              <div class="runtime-row"><span>Model</span><span title="{h(runtime.model_name)}">{h(runtime.model_name)}</span></div>
+              <div class="runtime-row"><span>Rules</span><span title="{h(rules_name)}">{h(rules_name)}</span></div>
+              <div class="runtime-row"><span>Reflection limit</span><span>{h(runtime.rules.reflection.max_iterations)}</span></div>
             </div>
             """,
         )

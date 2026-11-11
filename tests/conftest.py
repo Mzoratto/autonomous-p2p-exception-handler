@@ -1,10 +1,19 @@
 from pathlib import Path
 
 import pytest
+import streamlit as st
 from langgraph.checkpoint.memory import InMemorySaver
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.config import BusinessRules
+
+
+@pytest.fixture(autouse=True)
+def _clear_streamlit_resource_cache():
+    """AppTest instances in one process share st.cache_resource; isolate each test."""
+    st.cache_resource.clear()
+    yield
+    st.cache_resource.clear()
 
 
 @pytest.fixture
