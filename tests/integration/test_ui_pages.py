@@ -4,6 +4,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from p2p.application.service import CaseService, create_runtime
+from p2p.domain.models import DecisionType
 from p2p.infrastructure.database import demo_invoices
 
 REPO = Path(__file__).parents[2]
@@ -62,3 +63,23 @@ def test_review_query_param_selects_a_pending_case(database_url):
 
     for case_id in case_ids:
         assert open_page("review", case=case_id).selectbox(key="review_case").value == case_id
+
+
+def tab_labels(at: AppTest) -> list[str]:
+    return [tab.label for tab in at.tabs]
+
+
+def test_case_tabs_survive_a_label_change_after_review(database_url):
+    """R20: the keyed tabs keep working when the timeline count in a label changes."""
+    [case_id] = process(database_url, "03_large_price_variance")
+    at = open_page("cases", case=case_id)
+    assert "Audit timeline · 12" in tab_labels(at)
+
+    at.switch_page("src/p2p/ui/pages/review.py").run()
+    at.radio(key="review_action").set_value(DecisionType.REQUEST_INFO).run()
+    at.button(key="review_submit").click().run()
+    at.query_params["case"] = case_id
+    at.switch_page("src/p2p/ui/pages/cases.py").run()
+
+    assert not at.exception
+    assert "Audit timeline · 14" in tab_labels(at)

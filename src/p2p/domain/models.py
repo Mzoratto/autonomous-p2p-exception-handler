@@ -201,12 +201,23 @@ class CritiqueResult(BaseModel):
     confidence_adjustment: float = Field(default=0, ge=-1, le=1)
 
 
+class PolicyCheck(BaseModel):
+    """One row of the policy checklist; `passed` is None when the check does not apply."""
+
+    rule: str
+    label: str
+    threshold: str
+    actual: str
+    passed: bool | None
+
+
 class PolicyResult(BaseModel):
     permitted: bool
     requires_human_review: bool
     reasons: list[str]
     triggered_rules: list[str] = Field(default_factory=list)
     enforced_action: DecisionType | None = None
+    checks: list[PolicyCheck] = Field(default_factory=list)
 
 
 class HumanReview(BaseModel):

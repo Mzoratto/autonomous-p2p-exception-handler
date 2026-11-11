@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from p2p.domain.models import DecisionType, HumanReview
-from p2p.ui.components.case_detail import render_case
+from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import icon, render_html
 from p2p.ui.components.shell import page_header, show_failure, top_bar
 from p2p.ui.runtime import service
@@ -61,7 +61,7 @@ def render() -> None:
         on_change=remember_case,
     )
     case = app.get_case(selected_id) or pending[selected_id]
-    render_case(case)
+    render_case_detail(case, app)
     st.divider()
     render_html('<div class="p2p-section-title">Reviewer decision</div>')
     if case.get("submitted_review"):

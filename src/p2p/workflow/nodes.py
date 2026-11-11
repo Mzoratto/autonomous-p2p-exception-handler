@@ -231,25 +231,22 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
     count = state.get("reflection_count", 0) + (0 if critique.valid else 1)
     exhausted = not critique.valid and count >= deps.rules.reflection.max_iterations
+    confidence = state["resolution"].confidence
+    adjusted = max(0, min(confidence, confidence + critique.confidence_adjustment))
     _record(
         deps,
         state,
         AuditEventType.CRITIQUE_PASSED if critique.valid else AuditEventType.CRITIQUE_FAILED,
         "ai_critic",
-        {**critique.model_dump(mode="json"), "iteration": count, "exhausted": exhausted},
+        {
+            **critique.model_dump(mode="json"),
+            "iteration": count,
+            "exhausted": exhausted,
+            "adjusted_confidence": adjusted,
+        },
     )
     return {
-        "resolution": state["resolution"].model_copy(
-            update={
-                "confidence": max(
-                    0,
-                    min(
-                        state["resolution"].confidence,
-                        state["resolution"].confidence + critique.confidence_adjustment,
-                    ),
-                )
-            }
-        ),
+        "resolution": state["resolution"].model_copy(update={"confidence": adjusted}),
         "critique": critique,
         "reflection_count": count,
         "reflection_exhausted": exhausted,

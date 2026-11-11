@@ -1,3 +1,4 @@
+import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from p2p.domain.matching import ThreeWayMatcher
@@ -41,6 +42,16 @@ def test_reflexion_is_a_real_graph_loop_then_policy_interrupts(app):
     )
 
 
+def test_failed_critique_records_the_post_critic_confidence(app):
+    result = app.process_invoice(demo_invoices()["03_large_price_variance"])
+    failed = next(
+        event
+        for event in app.runtime.repository.for_case(result["case_id"])
+        if event.event_type is AuditEventType.CRITIQUE_FAILED
+    )
+    assert failed.data["adjusted_confidence"] == pytest.approx(0.75)
+
+
 def test_human_decision_resumes_checkpoint_and_finalizes(app):
     pending = app.process_invoice(demo_invoices()["03_large_price_variance"])
     completed = app.review_case(
@@ -71,6 +82,11 @@ def test_duplicate_auto_rejects_without_human(app):
     assert result["status"] == "COMPLETED"
     assert result["state"]["outcome"].action is DecisionType.REJECT
     assert result["state"]["outcome"].source is DecisionSource.AUTONOMOUS
+    assert "investigation" not in result["state"]
+    audit = app.get_case(result["case_id"])["audit"]
+    assert AuditEventType.INVESTIGATION_COMPLETED.value not in {
+        event["event_type"] for event in audit
+    }
 
 
 def test_max_reflection_iterations_force_human_review(app):

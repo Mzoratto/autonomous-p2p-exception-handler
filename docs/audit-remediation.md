@@ -41,3 +41,7 @@ The offline suite includes fault injection, SQLite restart recovery, concurrent 
 Docker verification also passed: the final image built, the health endpoint returned HTTP 200 over a loopback-only published port, and an exact completed case plus a pending review survived removal and recreation of the container using the same disposable named volume. The pending case then resumed to REJECT and exact-invoice replay returned the original case. The disposable container and volume were removed. The tested image manifest was `sha256:9be05753541f1a362574f76a946ec67633d8c03e8a2931ddbb48c25ef76756e6`.
 
 Production still requires authenticated reviewers, authoritative ERP allocations, currency/tax-specific rules, migrations/backups and external immutable audit retention.
+
+## Known limitations
+
+- **Override source without an AI recommendation.** When a case reaches human review without an AI resolution (a high-value exact match; from Phase 6 of the dashboard plan also a model outage), `human_review_node` and `finalize_node` compare the reviewer's decision with a default APPROVE. A Reject or Request info is therefore stored with source `HUMAN_OVERRIDDEN` although no AI recommendation existed. The stored value is left as is. The dashboard, and its override metric, count an override only when the case has an AI resolution.
