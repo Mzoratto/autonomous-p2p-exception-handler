@@ -42,7 +42,7 @@ from p2p.domain.models import (
     Supplier,
 )
 from p2p.domain.policy import DecisionPolicy
-from p2p.infrastructure.database import Database, SqliteRepository, seed_database
+from p2p.infrastructure.database import Database, SqliteRepository, demo_invoices, seed_database
 from p2p.intelligence.providers import MockModelProvider, OpenAIModelProvider
 from p2p.intelligence.services import Critic, Investigator, Resolver
 from p2p.workflow.graph import build_graph
@@ -187,7 +187,11 @@ class CaseService:
             return Invoice.model_validate_json(payload)
         return Invoice.model_validate(payload)
 
-    def _result(self, case: dict) -> dict:
+    @staticmethod
+    def demo_invoices() -> dict[str, Invoice]:
+        return demo_invoices()
+
+    def _result(self, case: dict, is_replay: bool = False) -> dict:
         snapshot = self.runtime.graph.get_state({"configurable": {"thread_id": case["case_id"]}})
         state = snapshot.values
         if not state:
@@ -197,7 +201,12 @@ class CaseService:
                 for key, value in case["state"].items()
                 if key in schemas
             }
-        return {"case_id": case["case_id"], "status": case["status"], "state": state}
+        return {
+            "case_id": case["case_id"],
+            "status": case["status"],
+            "state": state,
+            "is_replay": is_replay,
+        }
 
     def _reconcile(self, case_id: str) -> dict:
         repository = self.runtime.repository
@@ -236,13 +245,16 @@ class CaseService:
         invoice = Invoice.model_validate(invoice.model_dump())
         repository = self.runtime.repository
         with repository.command_lock():
-            case_id, _ = repository.claim_case(
+            case_id, created = repository.claim_case(
                 case_id or f"CASE-{uuid4().hex[:10].upper()}", invoice
             )
             config = {"configurable": {"thread_id": case_id}}
+            # A replay returns a case that was already settled before this call; a case that
+            # was still PROCESSING and is recovered here is not a replay.
+            settled_before = repository.get_case(case_id)["status"] != "PROCESSING"
             case = self._reconcile(case_id)
             if case["status"] != "PROCESSING":
-                return self._result(case)
+                return self._result(case, is_replay=not created and settled_before)
             snapshot = self.runtime.graph.get_state(config)
             self.runtime.graph.invoke(
                 {"case_id": case_id, "invoice": invoice} if not snapshot.values else None,

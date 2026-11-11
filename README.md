@@ -189,7 +189,7 @@ Financial thresholds are deliberately kept out of prompts.
 
 For local runs, the rules file is resolved from the project directory. Packaged deployments can use `P2P_RULES_PATH`, avoiding any dependency on the Python installation path.
 
-The dashboard has no login. The top bar shows the initials of `P2P_REVIEWER_NAME` (default `Demo Reviewer`).
+The dashboard has no login. Reviews are signed with the name in `P2P_REVIEWER_NAME` (default `Demo Reviewer`), and its initials appear in the top bar.
 
 ## Project scope
 
