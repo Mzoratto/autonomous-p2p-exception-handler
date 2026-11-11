@@ -7,6 +7,7 @@ from decimal import ROUND_HALF_EVEN, Decimal
 SEVERITY_RANK = {"CRITICAL": 4, "MATERIAL": 3, "WARNING": 2, "INFO": 1}
 HIGH_VALUE_RULE = "risk.human_review_invoice_value"
 CENT = Decimal("0.01")
+MAX_CENTS = 2**63 - 1  # SQLite INTEGER is a signed 64-bit value.
 
 
 def primary_exception(state: dict) -> tuple[str | None, str | None, int]:
@@ -26,7 +27,10 @@ def primary_exception(state: dict) -> tuple[str | None, str | None, int]:
 
 
 def total_cents(total: object) -> int:
-    return int(Decimal(str(total)).quantize(CENT, rounding=ROUND_HALF_EVEN) * 100)
+    cents = int(Decimal(str(total)).quantize(CENT, rounding=ROUND_HALF_EVEN) * 100)
+    if not -MAX_CENTS - 1 <= cents <= MAX_CENTS:
+        raise ValueError("Invoice total is too large to store")
+    return cents
 
 
 def project(invoice: dict, state: dict) -> dict:

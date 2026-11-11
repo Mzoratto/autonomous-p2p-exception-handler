@@ -113,11 +113,20 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
     runtime = create_runtime(
         database_url=f"sqlite:///{source}", demo_mode=True, checkpointer=InMemorySaver()
     )
-    cases = process(CaseService(runtime), "01_exact_match", "03_large_price_variance")
-    valid, broken = cases["01_exact_match"], cases["03_large_price_variance"]
+    cases = process(
+        CaseService(runtime), "01_exact_match", "02_small_price_variance", "03_large_price_variance"
+    )
+    valid, oversized, broken = cases.values()
     runtime.close()
     legacy = tmp_path / "legacy.db"
-    legacy_copy(source, legacy, [valid, broken], corrupt={broken})
+    legacy_copy(source, legacy, [valid, oversized, broken], corrupt={broken})
+    with sqlite3.connect(legacy) as connection:
+        # Valid JSON whose total in cents exceeds SQLite's signed 64-bit INTEGER.
+        connection.execute(
+            "UPDATE cases SET invoice_payload = json_set(invoice_payload, '$.total', "
+            "'92233720368547758.08') WHERE case_id = ?",
+            (oversized,),
+        )
 
     database = Database(f"sqlite:///{legacy}")
     database.create_all()
@@ -127,6 +136,9 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         assert row.last_error == "Migration could not read stored state: JSONDecodeError"
         assert row.created_at == row.updated_at
         assert (row.supplier_name, row.total_cents, row.primary_exception) == (None, None, None)
+        row = session.get(CaseRow, oversized)
+        assert row.last_error == "Migration could not read stored state: ValueError"
+        assert (row.supplier_name, row.total_cents) == (None, None)
         assert session.get(CaseRow, valid).supplier_name == "Acme Components"
     database.engine.dispose()
 
@@ -139,7 +151,11 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
     assert not at.exception
     table = at.dataframe[0].value
     status = dict(zip(table["Case"], table["Status"], strict=True))
-    assert status == {valid: "Approved · Autonomous", broken: "Needs recovery"}
+    assert status == {
+        valid: "Approved · Autonomous",
+        oversized: "Needs recovery",
+        broken: "Needs recovery",
+    }
 
 
 @pytest.fixture

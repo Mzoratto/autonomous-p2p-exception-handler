@@ -169,12 +169,16 @@ def recovery_panel(case: dict, app, submitted: dict) -> None:
     """The review was confirmed and bound before the workflow stopped; finish it unchanged."""
     stored = HumanReview.model_validate(submitted)
     tz, suffix = local_zone(st.context.timezone)
+    # Stored times are UTC; a naive value must not be read as the server's local time.
+    submitted_at = stored.reviewed_at
+    if submitted_at.tzinfo is None:
+        submitted_at = submitted_at.replace(tzinfo=UTC)
     rows = "".join(
         f'<div class="p2p-kv"><code>{h(key)}</code><span>{h(value)}</span></div>'
         for key, value in (
             ("Reviewer", stored.reviewer),
             ("Note", stored.comment or "No note added."),
-            ("Submitted", stored.reviewed_at.astimezone(tz).strftime("%d %b %Y %H:%M") + suffix),
+            ("Submitted", submitted_at.astimezone(tz).strftime("%d %b %Y %H:%M") + suffix),
         )
     )
     render_html(
