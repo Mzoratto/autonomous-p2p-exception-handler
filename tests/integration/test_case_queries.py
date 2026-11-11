@@ -186,6 +186,32 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
     }
 
 
+def test_startup_and_processing_survive_an_undecodable_case(tmp_path):
+    url = f"sqlite:///{tmp_path / 'p2p.db'}"
+    runtime = create_runtime(database_url=url, demo_mode=True)
+    broken = process(CaseService(runtime), "03_large_price_variance")["03_large_price_variance"]
+    runtime.close()
+    with sqlite3.connect(tmp_path / "p2p.db") as connection:
+        connection.execute(
+            "UPDATE cases SET state_payload = CAST(X'7BFF' AS TEXT) WHERE case_id = ?", (broken,)
+        )
+
+    runtime = create_runtime(database_url=url, demo_mode=True)
+    try:
+        app = CaseService(runtime)
+        app.refresh_open_cases()
+        result = app.process_invoice(demo_invoices()["01_exact_match"])
+
+        assert result["status"] == "COMPLETED"
+        rows = {row["case_id"]: row for row in app.query_cases(limit=None)[0]}
+        assert rows[broken]["last_error"].startswith("ValueError: Stored case could not be read")
+        assert display_status(rows[broken]).label == "Needs recovery"
+        with pytest.raises(ValueError, match="Stored case could not be read"):
+            app.get_case(broken)
+    finally:
+        runtime.close()
+
+
 def test_migration_leaves_a_row_unmarked_when_the_database_is_busy(tmp_path, monkeypatch):
     source = tmp_path / "source.db"
     runtime = create_runtime(

@@ -22,6 +22,7 @@ from sqlalchemy import (
     create_engine,
     func,
     inspect,
+    literal,
     or_,
     select,
     text,
@@ -304,7 +305,7 @@ class SqliteRepository:
     def has_data(self) -> bool:
         with self.database.session_factory() as session:
             return any(
-                session.scalar(select(model).limit(1)) is not None
+                session.scalar(select(literal(1)).select_from(model).limit(1)) is not None
                 for model in (
                     CaseRow,
                     CaseCommandRow,
@@ -326,18 +327,20 @@ class SqliteRepository:
             if command and command.invoice_payload != payload:
                 raise ValueError("Case ID is permanently bound to different invoice content")
             # Include pre-migration cases; never silently combine legacy duplicates.
-            for row in session.scalars(select(CaseRow)).all():
-                existing = Invoice.model_validate_json(row.invoice_payload)
+            # Only the invoice is read, so an unreadable case state cannot block a new claim.
+            rows = session.execute(select(CaseRow.case_id, CaseRow.invoice_payload)).all()
+            for row_case_id, invoice_payload in rows:
+                existing = Invoice.model_validate_json(invoice_payload)
                 same_identity = (
                     existing.supplier_id.strip().upper(),
                     existing.invoice_id.strip().upper(),
                 ) == (invoice.supplier_id, invoice.invoice_id)
-                if row.case_id == case_id or same_identity:
+                if row_case_id == case_id or same_identity:
                     if to_json(existing) != payload:
                         raise ValueError(
                             "Invoice or case identity already exists with different content"
                         )
-                    return row.case_id, False
+                    return row_case_id, False
             session.add(CaseCommandRow(case_id=case_id, identity=identity, invoice_payload=payload))
             session.add(
                 CaseRow(
@@ -387,14 +390,20 @@ class SqliteRepository:
     def reserved_quantities(
         self, po_number: str | None, exclude_case_id: str
     ) -> dict[str, Decimal]:
+        # Reads the invoice and the projected outcome only, never the case state.
+        with self.database.session_factory() as session:
+            rows = session.execute(
+                select(CaseRow.invoice_payload, CaseRow.outcome_action).where(
+                    CaseRow.case_id != exclude_case_id
+                )
+            ).all()
         quantities: dict[str, Decimal] = {}
-        for case in self.list_cases():
-            if case["case_id"] == exclude_case_id or case["invoice"].get("po_number") != po_number:
-                continue
-            if case["state"].get("outcome", {}).get("action") == "REJECT":
+        for invoice_payload, outcome_action in rows:
+            invoice = json.loads(invoice_payload)
+            if invoice.get("po_number") != po_number or outcome_action == "REJECT":
                 continue
             # Pending, interrupted, failed, and REQUEST_INFO cases retain reservations.
-            for line in case["invoice"]["line_items"]:
+            for line in invoice["line_items"]:
                 quantities[line["line_id"]] = quantities.get(
                     line["line_id"], Decimal("0")
                 ) + Decimal(line["quantity"])
