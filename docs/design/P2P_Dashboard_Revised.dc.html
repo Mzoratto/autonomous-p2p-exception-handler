@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,400,0..1,0&display=block" rel="stylesheet">
+<style>
+body{margin:0;background:#f1f3f6;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#1d4fc4;text-decoration:none}
+a:hover{color:#2f6fed;text-decoration:underline}
+button,input,textarea{font:inherit;color:inherit}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:{{ shellDir }};background:#f1f3f6;color:#131a26;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.45">
+
+  <aside style="flex:0 0 auto;width:{{ sideW }};background:#0e1525;color:#dce4f2;display:flex;flex-direction:{{ sideDir }};align-items:{{ sideAlign }};gap:{{ sideGap }};padding:{{ sidePad }};position:sticky;top:0;height:{{ sideH }};z-index:20;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:32px;height:32px;border-radius:8px;border:1px solid #4b6fd6;color:#a9bfff;display:grid;place-items:center;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500">P2P</div>
+      <div style="display:flex;flex-direction:column">
+        <span style="font-size:15px;font-weight:600;color:#ffffff">P2P Control</span>
+        <span style="font-size:12px;color:#a7b3c9">Exception operations</span>
+      </div>
+    </div>
+    <nav style="display:flex;flex-direction:{{ navDir }};flex-wrap:wrap;gap:4px">
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="5">
+        <button onClick="{{ n.go }}" style="display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border:0;border-radius:8px;background:{{ n.bg }};color:{{ n.fg }};font-size:14px;font-weight:500;cursor:pointer;text-align:left">
+          <span style="font-family:'Material Symbols Rounded';font-size:20px;line-height:1">{{ n.icon }}</span>
+          <span style="flex:1">{{ n.label }}</span>
+          <sc-if value="{{ n.hasCount }}" hint-placeholder-val="{{ false }}">
+            <span style="min-width:22px;height:20px;padding:0 6px;border-radius:999px;background:{{ n.badgeBg }};color:#ffffff;font-size:12px;font-weight:600;display:grid;place-items:center">{{ n.count }}</span>
+          </sc-if>
+        </button>
+      </sc-for>
+    </nav>
+    <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:auto;border:1px solid rgba(255,255,255,.1);background:#151e32;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px">
+        <span style="font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#a7b3c9">Runtime</span>
+        <sc-for list="{{ runtime }}" as="r" hint-placeholder-count="4">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:13px">
+            <span style="color:#a7b3c9">{{ r.k }}</span>
+            <span style="color:#eef2f9;text-align:right">{{ r.v }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </aside>
+
+  <div style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column">
+    <div style="position:sticky;top:{{ barTop }};z-index:10;background:#ffffff;border-bottom:1px solid #e2e5ea">
+      <div style="max-width:1400px;margin:0 auto;padding:10px 24px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px">
+          <sc-for list="{{ crumbs }}" as="cr" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:6px">
+              <sc-if value="{{ cr.hasSep }}" hint-placeholder-val="{{ false }}"><span style="font-family:'Material Symbols Rounded';font-size:16px;color:#5b6576">chevron_right</span></sc-if>
+              <button onClick="{{ cr.go }}" style="border:0;background:none;padding:0;cursor:pointer;color:{{ cr.fg }};font-weight:{{ cr.fw }};font-size:13px">{{ cr.label }}</button>
+            </div>
+          </sc-for>
+          <span style="display:flex;align-items:center;gap:4px;margin-left:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576"><span style="font-family:'Material Symbols Rounded';font-size:15px">link</span>{{ url }}</span>
+          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U6 · shareable URL</span></sc-if>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border:1px solid #e2e5ea;border-radius:999px;font-size:12px;color:#475264">
+            <span style="width:7px;height:7px;border-radius:50%;background:#1f9a5e"></span>
+            <span>Demo mode · {{ queueCount }} awaiting review</span>
+          </div>
+          <div title="Signed in as M. Zoratto" style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475264">
+            <span style="width:30px;height:30px;border-radius:50%;background:#e8effd;color:#1d4fc4;display:grid;place-items:center;font-size:12px;font-weight:600">MZ</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <main style="width:100%;max-width:1400px;margin:0 auto;padding:22px 24px 80px;display:flex;flex-direction:column;gap:20px">
+
+      <!-- OVERVIEW -->
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px">
+            <div>
+              <div style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#1d4fc4">Operations center</div>
+              <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.02em">Overview</h1>
+              <p style="margin:4px 0 0;color:#475264">Invoice exceptions handled by the control plane. Updated {{ nowLabel }}.</p>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <button onClick="{{ runAll }}" style="height:38px;padding:0 14px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px"><span style="font-family:'Material Symbols Rounded';font-size:18px">play_arrow</span>Run all 10 scenarios</button>
+              <button onClick="{{ goProcess }}" style="height:38px;padding:0 14px;border:0;border-radius:8px;background:#2f6fed;color:#ffffff;font-weight:500;cursor:pointer">Process invoice</button>
+            </div>
+          </div>
+
+          <sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:48px 24px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px">
+              <span style="font-family:'Material Symbols Rounded';font-size:36px;color:#5b6576">inbox</span>
+              <h2 style="margin:0;font-size:18px;font-weight:600">No cases yet</h2>
+              <p style="margin:0;max-width:440px;color:#475264;text-wrap:pretty">Run the ten demo scenarios to populate the dashboard, or process a single invoice to follow it through the workflow.</p>
+              <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:8px">
+                <button onClick="{{ runAll }}" style="height:38px;padding:0 16px;border:0;border-radius:8px;background:#2f6fed;color:#ffffff;font-weight:500;cursor:pointer">Run all 10 scenarios</button>
+                <button onClick="{{ goProcess }}" style="height:38px;padding:0 16px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;font-weight:500;cursor:pointer">Pick one scenario</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ notEmpty }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">B6 · counts from status, not total − completed · 4.2 auto-fit grid</span></sc-if>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+                <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="5">
+                  <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:4px;min-width:0">
+                    <span style="font-size:13px;font-weight:500;color:#475264">{{ k.label }}</span>
+                    <span style="font-size:28px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums">{{ k.value }}</span>
+                    <span style="font-size:13px;color:#5b6576">{{ k.note }}</span>
+                    <sc-if value="{{ k.hasTrend }}" hint-placeholder-val="{{ false }}">
+                      <span style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:{{ k.trendFg }}"><span style="font-family:'Material Symbols Rounded';font-size:16px">{{ k.trendIcon }}</span>{{ k.trend }}</span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px">
+                <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;min-width:0">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                    <h2 style="margin:0;font-size:16px;font-weight:600">Needs attention</h2>
+                    <button onClick="{{ goReview }}" style="border:0;background:none;color:#1d4fc4;font-size:13px;font-weight:500;cursor:pointer;padding:0">Open queue</button>
+                  </div>
+                  <span style="font-size:13px;color:#5b6576">Sorted by severity, value and time waiting</span>
+                  <div style="display:flex;flex-direction:column">
+                    <sc-for list="{{ queueRows }}" as="q" hint-placeholder-count="5">
+                      <button onClick="{{ q.open }}" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:12px;padding:10px 6px;border:0;border-top:1px solid #edf0f3;background:transparent;cursor:pointer;text-align:left" style-hover="background:#f6f8fb">
+                        <span style="padding:2px 8px;border-radius:999px;background:{{ q.sevBg }};color:{{ q.sevFg }};font-size:12px;font-weight:600">{{ q.sevLabel }}</span>
+                        <span style="display:flex;flex-direction:column;min-width:0">
+                          <span style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ q.sup }} · {{ q.typeLabel }}</span>
+                          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ q.inv }} · waiting {{ q.ageText }}</span>
+                        </span>
+                        <span style="font-variant-numeric:tabular-nums;font-weight:500">{{ q.totalText }}</span>
+                        <span style="font-family:'Material Symbols Rounded';font-size:18px;color:#5b6576">chevron_right</span>
+                      </button>
+                    </sc-for>
+                  </div>
+                </div>
+
+                <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+                    <h2 style="margin:0;font-size:16px;font-weight:600">Time waiting for review</h2>
+                    <span style="font-size:12px;color:#5b6576;display:flex;align-items:center;gap:6px"><span style="width:10px;height:0;border-top:2px dashed #a1122b"></span>24h target</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:10px">
+                    <sc-for list="{{ waitBars }}" as="w" hint-placeholder-count="5">
+                      <div style="display:grid;grid-template-columns:96px minmax(0,1fr) 64px;align-items:center;gap:10px">
+                        <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#475264">{{ w.inv }}</span>
+                        <div style="position:relative;height:22px;background:#f1f3f6;border-radius:4px">
+                          <div style="position:absolute;left:0;top:0;bottom:0;width:{{ w.w }};background:{{ w.color }};border-radius:4px"></div>
+                          <div style="position:absolute;left:{{ slaLeft }};top:-3px;bottom:-3px;border-left:2px dashed #a1122b"></div>
+                        </div>
+                        <span style="font-size:13px;font-variant-numeric:tabular-nums;text-align:right;color:{{ w.fg }};font-weight:{{ w.fw }}">{{ w.ageText }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <span style="font-size:12px;color:#5b6576">Bar colour shows severity. Rendered with st.altair_chart in the build.</span>
+                </div>
+              </div>
+
+              <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:14px">
+                <h2 style="margin:0;font-size:16px;font-weight:600">Outcomes</h2>
+                <div style="display:flex;height:12px;border-radius:999px;overflow:hidden;background:#f1f3f6;gap:2px">
+                  <sc-for list="{{ outcomes }}" as="o" hint-placeholder-count="4">
+                    <div style="width:{{ o.w }};background:{{ o.color }}"></div>
+                  </sc-for>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+                  <sc-for list="{{ outcomes }}" as="o" hint-placeholder-count="4">
+                    <div style="display:flex;gap:10px;align-items:flex-start">
+                      <span style="width:10px;height:10px;border-radius:3px;background:{{ o.color }};margin-top:5px"></span>
+                      <div style="display:flex;flex-direction:column">
+                        <span style="font-weight:500">{{ o.label }} · {{ o.count }}</span>
+                        <span style="font-size:13px;color:#5b6576">{{ o.value }} · {{ o.sub }}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- PROCESS -->
+      <sc-if value="{{ isProcess }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <div>
+            <div style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#1d4fc4">New workflow</div>
+            <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.02em">Process an invoice</h1>
+            <p style="margin:4px 0 0;color:#475264">Pick a scenario, validate it, then run the controlled workflow.</p>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+            <sc-for list="{{ steps }}" as="st" hint-placeholder-count="3">
+              <div style="display:flex;align-items:center;gap:8px">
+                <button onClick="{{ st.go }}" style="display:flex;align-items:center;gap:10px;height:40px;padding:0 14px 0 8px;border:1px solid {{ st.border }};border-radius:999px;background:{{ st.bg }};cursor:{{ st.cursor }};opacity:{{ st.op }}">
+                  <span style="width:24px;height:24px;border-radius:50%;background:{{ st.dotBg }};color:{{ st.dotFg }};display:grid;place-items:center;font-size:12px;font-weight:600"><span style="font-family:{{ st.dotFont }};font-size:{{ st.dotSize }}">{{ st.dot }}</span></span>
+                  <span style="font-weight:500;color:{{ st.fg }}">{{ st.label }}</span>
+                </button>
+                <sc-if value="{{ st.hasLine }}" hint-placeholder-val="{{ true }}"><span style="width:28px;height:1px;background:#d5d9e0"></span></sc-if>
+              </div>
+            </sc-for>
+            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U7 · future steps disabled</span></sc-if>
+          </div>
+
+          <sc-if value="{{ pStep0 }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <h2 style="margin:0;font-size:16px;font-weight:600">Demo scenarios</h2>
+                <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U8 · cards with expected behaviour</span></sc-if>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px">
+                <sc-for list="{{ scenarios }}" as="sc" hint-placeholder-count="10">
+                  <button onClick="{{ sc.pick }}" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid #e2e5ea;border-radius:12px;background:#ffffff;text-align:left;cursor:pointer" style-hover="border-color:#2f6fed;box-shadow:0 0 0 3px #e8effd">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ sc.k }}</span>
+                      <span style="padding:2px 8px;border-radius:999px;background:{{ sc.tagBg }};color:{{ sc.tagFg }};font-size:12px;font-weight:500">{{ sc.tag }}</span>
+                    </div>
+                    <span style="font-size:15px;font-weight:600">{{ sc.name }}</span>
+                    <span style="font-size:13px;color:#475264;flex:1;text-wrap:pretty">{{ sc.exp }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ sc.inv }} · {{ sc.amt }}</span>
+                  </button>
+                </sc-for>
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:16px;border:1px dashed #b9c0cb;border-radius:12px;background:#f8f9fb;text-align:center;color:#475264">
+                  <span style="font-family:'Material Symbols Rounded';font-size:26px">upload_file</span>
+                  <span style="font-weight:500">Upload or paste JSON</span>
+                  <span style="font-size:12px;color:#5b6576">Invoice schema v1</span>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ pStep1 }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:16px;max-width:760px">
+              <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center">
+                <div style="display:flex;flex-direction:column">
+                  <span style="font-size:13px;color:#5b6576">{{ pSc.k }} · {{ pSc.name }}</span>
+                  <h2 style="margin:0;font-size:18px;font-weight:600">Validate {{ pSc.inv }}</h2>
+                </div>
+                <button onClick="{{ toggleErr }}" style="border:1px solid #d5d9e0;background:#ffffff;border-radius:8px;height:32px;padding:0 10px;font-size:13px;cursor:pointer">{{ errToggleLabel }}</button>
+              </div>
+              <sc-if value="{{ pValid }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;flex-direction:column">
+                  <sc-for list="{{ valChecks }}" as="v" hint-placeholder-count="6">
+                    <div style="display:grid;grid-template-columns:24px 160px minmax(0,1fr);gap:10px;align-items:center;padding:9px 0;border-top:1px solid #edf0f3">
+                      <span style="font-family:'Material Symbols Rounded';font-size:20px;color:#1f9a5e">check_circle</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">{{ v.f }}</span>
+                      <span style="color:#475264">{{ v.d }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ pErr }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;background:#fce7eb;color:#8f1026;font-weight:500">
+                    <span style="font-family:'Material Symbols Rounded';font-size:20px">error</span>3 fields need fixing before this invoice can be processed
+                    <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U9</span></sc-if>
+                  </div>
+                  <sc-for list="{{ valErrors }}" as="e" hint-placeholder-count="3">
+                    <div style="display:grid;grid-template-columns:24px minmax(140px,200px) minmax(0,1fr);gap:10px;align-items:start;padding:9px 0;border-top:1px solid #edf0f3">
+                      <span style="font-family:'Material Symbols Rounded';font-size:20px;color:#c23b4a">cancel</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:13px">{{ e.f }}</span>
+                      <span style="color:#475264">{{ e.m }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">
+                <button onClick="{{ stepBack }}" style="height:38px;padding:0 14px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;font-weight:500;cursor:pointer">Back</button>
+                <button onClick="{{ runWorkflow }}" style="height:38px;padding:0 16px;border:0;border-radius:8px;background:{{ runBg }};color:#ffffff;font-weight:500;cursor:{{ runCursor }}">Run workflow</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ pStep2 }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:16px;max-width:760px">
+              <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center">
+                <div style="display:flex;flex-direction:column">
+                  <span style="font-size:13px;color:#5b6576">{{ pSc.k }} · {{ pSc.name }}</span>
+                  <h2 style="margin:0;font-size:18px;font-weight:600">{{ pCase.inv }} → {{ pCase.statusLabel }}</h2>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:{{ pCase.stBg }};color:{{ pCase.stFg }};font-size:13px;font-weight:600"><span style="width:7px;height:7px;border-radius:50%;background:{{ pCase.stDot }}"></span>{{ pCase.statusLabel }}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:8px;background:#f1f5fd;color:#1d3f91;font-size:13px">
+                <span style="font-family:'Material Symbols Rounded';font-size:18px">info</span>
+                <span>This invoice was already processed. Identical invoices return their original case, {{ pCase.id }}.</span>
+              </div>
+              <div style="display:flex;flex-direction:column">
+                <sc-for list="{{ pEvents }}" as="pe" hint-placeholder-count="8">
+                  <div style="display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #edf0f3">
+                    <span style="width:8px;height:8px;border-radius:50%;background:{{ pe.dot }};justify-self:center"></span>
+                    <span>{{ pe.name }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ pe.delta }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">
+                <button onClick="{{ processAnother }}" style="height:38px;padding:0 14px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;font-weight:500;cursor:pointer">Process another</button>
+                <button onClick="{{ openPCase }}" style="height:38px;padding:0 16px;border:0;border-radius:8px;background:#2f6fed;color:#ffffff;font-weight:500;cursor:pointer">Open case</button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <!-- CASES TABLE -->
+      <sc-if value="{{ isCases }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div>
+            <div style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#1d4fc4">Case archive</div>
+            <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.02em">Cases</h1>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <sc-for list="{{ filters }}" as="f" hint-placeholder-count="5">
+                <button onClick="{{ f.go }}" style="height:32px;padding:0 12px;border-radius:999px;border:1px solid {{ f.border }};background:{{ f.bg }};color:{{ f.fg }};font-size:13px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px">{{ f.label }}<span style="font-variant-numeric:tabular-nums;opacity:.8">{{ f.count }}</span></button>
+              </sc-for>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;flex:0 1 300px;min-width:200px">
+              <span style="font-family:'Material Symbols Rounded';font-size:18px;color:#5b6576">search</span>
+              <input value="{{ q }}" onChange="{{ onSearch }}" placeholder="Search case, invoice, supplier, PO" style="border:0;outline:0;background:transparent;flex:1;min-width:0;font-size:13px">
+            </label>
+          </div>
+          <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;overflow-x:auto">
+            <div style="min-width:980px">
+              <div style="display:grid;grid-template-columns:150px minmax(190px,1.4fr) 120px minmax(190px,1.3fr) 130px 190px 110px;gap:12px;padding:10px 16px;border-bottom:1px solid #e2e5ea;background:#f8f9fb">
+                <sc-for list="{{ cols }}" as="col" hint-placeholder-count="7">
+                  <button onClick="{{ col.go }}" style="display:flex;align-items:center;justify-content:{{ col.justify }};gap:2px;border:0;background:none;padding:0;cursor:pointer;font-size:12px;font-weight:600;color:{{ col.fg }};letter-spacing:.04em;text-transform:uppercase">{{ col.label }}<span style="font-family:'Material Symbols Rounded';font-size:16px">{{ col.icon }}</span></button>
+                </sc-for>
+              </div>
+              <sc-for list="{{ tableRows }}" as="r" hint-placeholder-count="10">
+                <button onClick="{{ r.open }}" style="width:100%;display:grid;grid-template-columns:150px minmax(190px,1.4fr) 120px minmax(190px,1.3fr) 130px 190px 110px;gap:12px;align-items:center;padding:11px 16px;border:0;border-bottom:1px solid #edf0f3;background:#ffffff;text-align:left;cursor:pointer" style-hover="background:#f6f8fb">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1d4fc4">{{ r.id }}</span>
+                  <span style="display:flex;flex-direction:column;min-width:0">
+                    <span style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.sup }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ r.inv }} · {{ r.poText }}</span>
+                  </span>
+                  <span style="text-align:right;font-variant-numeric:tabular-nums;font-weight:500">{{ r.totalText }}</span>
+                  <span style="display:flex;align-items:center;gap:8px;min-width:0">
+                    <span style="padding:2px 8px;border-radius:999px;background:{{ r.sevBg }};color:{{ r.sevFg }};font-size:12px;font-weight:600">{{ r.sevLabel }}</span>
+                    <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#475264">{{ r.typeLabel }}</span>
+                  </span>
+                  <span style="display:flex;align-items:center;gap:8px">
+                    <span style="flex:1;height:6px;border-radius:999px;background:#edf0f3;overflow:hidden"><span style="display:block;height:100%;width:{{ r.confW }};background:#2f6fed"></span></span>
+                    <span style="font-variant-numeric:tabular-nums;font-size:13px;color:#475264;width:30px">{{ r.confText }}</span>
+                  </span>
+                  <span><span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:{{ r.stBg }};color:{{ r.stFg }};font-size:12px;font-weight:600;white-space:nowrap"><span style="width:7px;height:7px;border-radius:50%;background:{{ r.stDot }}"></span>{{ r.statusLabel }}</span></span>
+                  <span style="font-size:13px;color:#5b6576">{{ r.updatedText }}</span>
+                </button>
+              </sc-for>
+              <sc-if value="{{ noRows }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:32px;text-align:center;color:#5b6576">No cases match this filter.</div>
+              </sc-if>
+            </div>
+          </div>
+          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="align-self:flex-start;font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U4 · st.dataframe with row selection, filters, search, sort · B3 one combined status</span></sc-if>
+        </div>
+      </sc-if>
+
+      <!-- ABOUT -->
+      <sc-if value="{{ isAbout }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:18px;max-width:900px">
+          <div>
+            <div style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#1d4fc4">About</div>
+            <h1 style="margin:4px 0 0;font-size:28px;font-weight:700;letter-spacing:-.02em">AI recommends. Policy authorizes. Humans own material risk.</h1>
+            <p style="margin:8px 0 0;color:#475264;text-wrap:pretty">A working simulation of an invoice-exception control plane for Procure-to-Pay operations. It cannot move money, write to an ERP, or contact a supplier.</p>
+          </div>
+          <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;overflow:hidden">
+            <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;padding:10px 16px;background:#f8f9fb;border-bottom:1px solid #e2e5ea;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#475264"><span>Responsibility</span><span>Owner</span></div>
+            <sc-for list="{{ owners }}" as="ow" hint-placeholder-count="8">
+              <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;padding:10px 16px;border-bottom:1px solid #edf0f3">
+                <span>{{ ow.r }}</span>
+                <span style="display:flex;align-items:center;gap:8px;color:{{ ow.fg }};font-weight:500"><span style="width:8px;height:8px;border-radius:2px;background:{{ ow.fg }}"></span>{{ ow.o }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+            <sc-for list="{{ runtimeFull }}" as="r" hint-placeholder-count="5">
+              <div style="display:flex;flex-direction:column">
+                <span style="font-size:13px;color:#5b6576">{{ r.k }}</span>
+                <span style="font-weight:500">{{ r.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- REVIEW / CASE DETAIL -->
+      <sc-if value="{{ showWork }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">
+
+          <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+            <aside style="flex:1 1 260px;max-width:{{ queueMax }};display:flex;flex-direction:column;gap:10px;position:{{ queuePos }};top:76px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+                <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">Review queue</h1>
+                <span style="font-size:13px;color:#5b6576">{{ queueCount }} open</span>
+              </div>
+              <span style="font-size:12px;color:#5b6576;display:flex;align-items:center;gap:6px">Priority: severity, then value and wait
+                <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U5</span></sc-if>
+              </span>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <sc-for list="{{ queueRows }}" as="q" hint-placeholder-count="5">
+                  <button onClick="{{ q.open }}" style="display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid {{ q.border }};border-radius:10px;background:{{ q.bg }};text-align:left;cursor:pointer;box-shadow:{{ q.shadow }}">
+                    <span style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+                      <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ q.sup }}</span>
+                      <span style="font-variant-numeric:tabular-nums;font-weight:500">{{ q.totalText }}</span>
+                    </span>
+                    <span style="font-size:13px;color:#475264">{{ q.typeLabel }}</span>
+                    <span style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                      <span style="padding:1px 8px;border-radius:999px;background:{{ q.sevBg }};color:{{ q.sevFg }};font-size:12px;font-weight:600">{{ q.sevLabel }}</span>
+                      <span style="font-size:12px;color:{{ q.ageFg }};display:flex;align-items:center;gap:4px"><span style="font-family:'Material Symbols Rounded';font-size:15px">schedule</span>{{ q.ageText }}</span>
+                    </span>
+                  </button>
+                </sc-for>
+              </div>
+              <sc-if value="{{ queueEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:20px;border:1px dashed #c9cfd8;border-radius:10px;text-align:center;color:#475264;font-size:13px">No cases waiting.</div>
+              </sc-if>
+            </aside>
+          </sc-if>
+
+          <sc-if value="{{ noCase }}" hint-placeholder-val="{{ false }}">
+            <div style="flex:999 1 560px;background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:56px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center">
+              <span style="width:48px;height:48px;border-radius:12px;background:#e3f3ea;color:#14653f;display:grid;place-items:center;font-family:'Material Symbols Rounded';font-size:26px">task_alt</span>
+              <h2 style="margin:0;font-size:18px;font-weight:600">Queue clear</h2>
+              <p style="margin:0;color:#475264">No cases are waiting for a human decision.</p>
+              <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center">
+                <button onClick="{{ goCases }}" style="height:36px;padding:0 14px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;font-weight:500;cursor:pointer">See decided cases</button>
+                <button onClick="{{ goProcess }}" style="height:36px;padding:0 14px;border:0;border-radius:8px;background:#2f6fed;color:#ffffff;font-weight:500;cursor:pointer">Process invoice</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ hasCase }}" hint-placeholder-val="{{ true }}">
+            <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
+
+              <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+                <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:10px">
+                  <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                    <span style="display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ cc.id }}
+                      <button onClick="{{ copyLink }}" style="display:flex;align-items:center;gap:4px;border:0;background:none;padding:0;color:#1d4fc4;font-family:'IBM Plex Sans',sans-serif;font-size:12px;cursor:pointer"><span style="font-family:'Material Symbols Rounded';font-size:15px">content_copy</span>Copy link</button>
+                    </span>
+                    <h2 style="margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em">{{ cc.sup }} · {{ cc.inv }}</h2>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:{{ cc.stBg }};color:{{ cc.stFg }};font-size:13px;font-weight:600"><span style="width:7px;height:7px;border-radius:50%;background:{{ cc.stDot }}"></span>{{ cc.statusLabel }}</span>
+                    <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">B3 · 2.5</span></sc-if>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px 20px">
+                  <sc-for list="{{ headerMeta }}" as="hm" hint-placeholder-count="5">
+                    <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                      <span style="font-size:12px;color:#5b6576">{{ hm.k }}</span>
+                      <span style="font-weight:600;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px;flex-wrap:wrap">{{ hm.v }}
+                        <sc-if value="{{ hm.hasChip }}" hint-placeholder-val="{{ false }}"><span style="padding:1px 8px;border-radius:999px;background:{{ hm.chipBg }};color:{{ hm.chipFg }};font-size:12px;font-weight:600">{{ hm.chip }}</span></sc-if>
+                      </span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+                <div style="flex:999 1 440px;min-width:0;background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;display:flex;flex-direction:column">
+                  <div style="display:flex;gap:4px;padding:0 12px;border-bottom:1px solid #e2e5ea;overflow-x:auto">
+                    <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+                      <button onClick="{{ t.go }}" style="display:flex;align-items:center;gap:8px;height:46px;padding:0 10px;border:0;border-bottom:2px solid {{ t.line }};background:none;color:{{ t.fg }};font-weight:{{ t.fw }};cursor:pointer;white-space:nowrap">{{ t.label }}<span style="padding:1px 7px;border-radius:999px;background:{{ t.badgeBg }};color:{{ t.badgeFg }};font-size:12px;font-weight:600">{{ t.badge }}</span></button>
+                    </sc-for>
+                  </div>
+
+                  <sc-if value="{{ tabMatch }}" hint-placeholder-val="{{ false }}">
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:16px">
+                      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
+                        <sc-for list="{{ checks }}" as="ch" hint-placeholder-count="5">
+                          <div style="display:flex;gap:8px;align-items:flex-start;padding:10px;border-radius:8px;background:#f8f9fb">
+                            <span style="font-family:'Material Symbols Rounded';font-size:20px;color:{{ ch.color }}">{{ ch.icon }}</span>
+                            <span style="display:flex;flex-direction:column;min-width:0">
+                              <span style="font-size:12px;color:#5b6576">{{ ch.l }}</span>
+                              <span style="font-size:13px;font-weight:500">{{ ch.v }}</span>
+                            </span>
+                          </div>
+                        </sc-for>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:6px">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                          <h3 style="margin:0;font-size:15px;font-weight:600">Line 1 · Industrial components</h3>
+                          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U2 · three-way match grid</span></sc-if>
+                        </div>
+                        <div style="overflow-x:auto;border:1px solid #e2e5ea;border-radius:10px">
+                          <div style="min-width:700px">
+                            <div style="display:grid;grid-template-columns:100px repeat(3,minmax(90px,1fr)) minmax(170px,1.5fr) minmax(150px,1.2fr);gap:0;background:#f8f9fb;border-bottom:1px solid #e2e5ea;font-size:12px;font-weight:600;color:#475264;letter-spacing:.04em;text-transform:uppercase">
+                              <span style="padding:9px 12px"></span><span style="padding:9px 12px;text-align:right">Invoice</span><span style="padding:9px 12px;text-align:right">PO</span><span style="padding:9px 12px;text-align:right">Receipt</span><span style="padding:9px 12px">Variance</span><span style="padding:9px 12px">Tolerance</span>
+                            </div>
+                            <sc-for list="{{ matchRows }}" as="m" hint-placeholder-count="3">
+                              <div style="display:grid;grid-template-columns:100px repeat(3,minmax(90px,1fr)) minmax(170px,1.5fr) minmax(150px,1.2fr);border-bottom:1px solid #edf0f3;font-variant-numeric:tabular-nums">
+                                <span style="padding:11px 12px;font-weight:500">{{ m.f }}</span>
+                                <span style="padding:11px 12px;text-align:right;background:{{ m.invBg }};color:{{ m.invFg }};font-weight:{{ m.invFw }}">{{ m.inv }}</span>
+                                <span style="padding:11px 12px;text-align:right;color:#475264">{{ m.po }}</span>
+                                <span style="padding:11px 12px;text-align:right;color:#475264">{{ m.gr }}</span>
+                                <span style="padding:11px 12px;color:{{ m.varFg }};font-weight:500">{{ m.varT }}</span>
+                                <span style="padding:8px 12px;display:flex;flex-direction:column;gap:2px">
+                                  <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:{{ m.resFg }}"><span style="font-family:'Material Symbols Rounded';font-size:16px">{{ m.resIcon }}</span>{{ m.res }}</span>
+                                  <span style="font-size:12px;color:#5b6576">{{ m.tol }}</span>
+                                </span>
+                              </div>
+                            </sc-for>
+                          </div>
+                        </div>
+                      </div>
+                      <sc-if value="{{ hasDisc }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:10px;background:{{ disc.bg }}">
+                          <span style="padding:1px 8px;border-radius:999px;background:#ffffff;color:{{ disc.fg }};font-size:12px;font-weight:600">{{ disc.sev }}</span>
+                          <div style="display:flex;flex-direction:column;gap:2px">
+                            <span style="font-weight:600;color:{{ disc.fg }}">{{ disc.title }}</span>
+                            <span style="color:#33405a">{{ disc.text }}</span>
+                            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ disc.id }} · three_way_matcher</span>
+                          </div>
+                          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">B1</span></sc-if>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{ tabAi }}" hint-placeholder-val="{{ false }}">
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:14px">
+                      <sc-if value="{{ noAi }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;gap:10px;align-items:flex-start;padding:14px;border-radius:10px;background:#f8f9fb">
+                          <span style="font-family:'Material Symbols Rounded';font-size:22px;color:#475264">bolt</span>
+                          <div style="display:flex;flex-direction:column;gap:2px">
+                            <span style="font-weight:600">AI not invoked</span>
+                            <span style="color:#475264;text-wrap:pretty">{{ noAiText }}</span>
+                          </div>
+                        </div>
+                      </sc-if>
+                      <sc-if value="{{ hasAi }}" hint-placeholder-val="{{ true }}">
+                        <div style="display:flex;flex-direction:column;gap:14px">
+                          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                            <h3 style="margin:0;font-size:15px;font-weight:600">{{ loopTitle }}</h3>
+                            <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U1 · revision loop as a sequence</span></sc-if>
+                          </div>
+                          <div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border:1px solid #e2e5ea;border-radius:10px">
+                            <span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5b6576">Investigator</span>
+                            <span style="font-weight:500">{{ invest.root }}</span>
+                            <span style="font-size:13px;color:#475264">Missing: {{ invest.missing }} · suggests {{ invest.action }} · confidence {{ invest.conf }}</span>
+                          </div>
+                          <sc-for list="{{ attempts }}" as="a" hint-placeholder-count="2">
+                            <div style="display:flex;flex-direction:column;border:1px solid {{ a.border }};border-radius:10px;overflow:hidden">
+                              <div style="padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:#ffffff">
+                                <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center">
+                                  <span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5b6576">Attempt {{ a.n }} · Resolution agent</span>
+                                  <span style="display:flex;align-items:center;gap:8px">
+                                    <span style="padding:2px 10px;border-radius:999px;background:{{ a.actBg }};color:{{ a.actFg }};font-size:12px;font-weight:600;text-decoration:{{ a.strike }}">{{ a.action }}</span>
+                                    <span style="font-size:13px;color:#475264;font-variant-numeric:tabular-nums">conf {{ a.conf }}</span>
+                                  </span>
+                                </div>
+                                <span style="color:#33405a;text-wrap:pretty">{{ a.rationale }}</span>
+                                <sc-if value="{{ a.hasRequest }}" hint-placeholder-val="{{ false }}">
+                                  <span style="font-size:13px;color:#475264;padding:8px 10px;border-radius:6px;background:#f1f5fd">Information request: {{ a.request }}</span>
+                                </sc-if>
+                              </div>
+                              <div style="padding:12px 14px;display:flex;gap:10px;align-items:flex-start;background:{{ a.critBg }};border-top:1px solid {{ a.border }}">
+                                <span style="font-family:'Material Symbols Rounded';font-size:20px;color:{{ a.critFg }}">{{ a.critIcon }}</span>
+                                <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                                  <span style="font-weight:600;color:{{ a.critFg }}">{{ a.critTitle }}</span>
+                                  <sc-for list="{{ a.issues }}" as="is" hint-placeholder-count="1">
+                                    <span style="color:#33405a">{{ is }}</span>
+                                  </sc-for>
+                                  <sc-for list="{{ a.changes }}" as="chg" hint-placeholder-count="1">
+                                    <span style="font-size:13px;color:#475264">Recommended: {{ chg }}</span>
+                                  </sc-for>
+                                </div>
+                              </div>
+                            </div>
+                          </sc-for>
+                          <sc-if value="{{ hasDiff }}" hint-placeholder-val="{{ false }}">
+                            <div style="border:1px solid #e2e5ea;border-radius:10px;overflow:hidden">
+                              <div style="padding:10px 14px;background:#f8f9fb;font-weight:600;border-bottom:1px solid #e2e5ea">What changed between attempts</div>
+                              <sc-for list="{{ diff }}" as="d" hint-placeholder-count="4">
+                                <div style="display:grid;grid-template-columns:130px minmax(0,1fr) 24px minmax(0,1fr);gap:8px;align-items:center;padding:9px 14px;border-bottom:1px solid #edf0f3;font-size:13px">
+                                  <span style="color:#5b6576">{{ d.f }}</span>
+                                  <span style="color:#a1122b;text-decoration:line-through">{{ d.a }}</span>
+                                  <span style="font-family:'Material Symbols Rounded';font-size:16px;color:#5b6576">arrow_forward</span>
+                                  <span style="color:#14653f;font-weight:500">{{ d.b }}</span>
+                                </div>
+                              </sc-for>
+                            </div>
+                          </sc-if>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{ tabPolicy }}" hint-placeholder-val="{{ false }}">
+                    <div style="padding:18px;display:flex;flex-direction:column;gap:12px">
+                      <div style="display:flex;gap:10px;align-items:center;padding:12px 14px;border-radius:10px;background:{{ verdict.bg }};color:{{ verdict.fg }};font-weight:500">
+                        <span style="font-family:'Material Symbols Rounded';font-size:20px">{{ verdict.icon }}</span>{{ verdict.text }}
+                        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">B7 · U3 checklist</span></sc-if>
+                      </div>
+                      <div style="display:flex;flex-direction:column">
+                        <sc-for list="{{ rules }}" as="ru" hint-placeholder-count="9">
+                          <div style="display:grid;grid-template-columns:24px minmax(0,1.5fr) minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:center;padding:10px 0;border-top:1px solid #edf0f3">
+                            <span style="font-family:'Material Symbols Rounded';font-size:20px;color:{{ ru.color }}">{{ ru.icon }}</span>
+                            <span style="font-weight:500">{{ ru.rule }}</span>
+                            <span style="font-size:13px;color:#5b6576">{{ ru.thr }}</span>
+                            <span style="font-size:13px;font-variant-numeric:tabular-nums;color:{{ ru.actFg }};font-weight:{{ ru.actFw }}">{{ ru.act }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                      <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">Source: config/business_rules.yaml</span>
+                    </div>
+                  </sc-if>
+
+                  <sc-if value="{{ tabTimeline }}" hint-placeholder-val="{{ false }}">
+                    <div style="padding:18px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+                      <div style="flex:2 1 320px;min-width:0;display:flex;flex-direction:column">
+                        <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#5b6576;margin-bottom:6px">{{ tlDay }} · local time
+                          <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">U10</span></sc-if>
+                        </div>
+                        <sc-for list="{{ events }}" as="ev" hint-placeholder-count="10">
+                          <button onClick="{{ ev.select }}" style="display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 8px;border:0;border-radius:8px;background:{{ ev.bg }};text-align:left;cursor:pointer">
+                            <span style="width:10px;height:10px;border-radius:50%;background:{{ ev.dot }};justify-self:center"></span>
+                            <span style="display:flex;flex-direction:column;min-width:0">
+                              <span style="font-weight:500">{{ ev.name }}</span>
+                              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ ev.actor }}</span>
+                            </span>
+                            <span style="display:flex;flex-direction:column;align-items:flex-end">
+                              <span style="font-size:13px;font-variant-numeric:tabular-nums">{{ ev.time }}</span>
+                              <span style="font-size:12px;color:#5b6576;font-variant-numeric:tabular-nums">{{ ev.delta }}</span>
+                            </span>
+                          </button>
+                        </sc-for>
+                      </div>
+                      <div style="flex:1 1 220px;min-width:0;position:sticky;top:80px;border:1px solid #e2e5ea;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px">
+                        <span style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5b6576">Event details</span>
+                        <span style="font-weight:600">{{ evSel.name }}</span>
+                        <span style="font-size:13px;color:#475264">{{ evSel.time }} · {{ evSel.rel }}</span>
+                        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+                          <sc-for list="{{ evSel.data }}" as="kv" hint-placeholder-count="3">
+                            <div style="display:flex;flex-direction:column;padding-top:6px;border-top:1px solid #edf0f3">
+                              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5b6576">{{ kv.k }}</span>
+                              <span style="font-size:13px;word-break:break-word">{{ kv.v }}</span>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </div>
+                  </sc-if>
+                </div>
+
+                <div style="flex:1 1 300px;min-width:0;max-width:{{ panelMax }};position:{{ panelPos }};top:76px;display:flex;flex-direction:column;gap:12px">
+                  <sc-if value="{{ ccReview }}" hint-placeholder-val="{{ true }}">
+                    <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px">
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                        <h3 style="margin:0;font-size:16px;font-weight:600">Your decision</h3>
+                        <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#131a26;color:#ffffff;border-radius:4px;padding:1px 6px">B5 · beside evidence</span></sc-if>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:10px;background:#f8f9fb">
+                        <span style="font-size:12px;color:#5b6576">AI recommendation</span>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                          <span style="padding:2px 10px;border-radius:999px;background:{{ rec.bg }};color:{{ rec.fg }};font-size:13px;font-weight:600">{{ rec.label }}</span>
+                          <span style="font-size:13px;color:#475264;font-variant-numeric:tabular-nums">{{ rec.conf }}</span>
+                        </div>
+                        <div style="position:relative;height:6px;border-radius:999px;background:#e2e5ea">
+                          <div style="position:absolute;left:0;top:0;bottom:0;width:{{ rec.w }};border-radius:999px;background:#2f6fed"></div>
+                          <div title="0.90 auto-resolve gate" style="position:absolute;left:90%;top:-4px;bottom:-4px;width:2px;background:#131a26"></div>
+                        </div>
+                        <span style="font-size:12px;color:#5b6576">{{ rec.note }}</span>
+                      </div>
+                      <div style="display:flex;flex-direction:column;gap:6px">
+                        <sc-for list="{{ decisionOpts }}" as="o" hint-placeholder-count="3">
+                          <button onClick="{{ o.pick }}" style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid {{ o.border }};border-radius:10px;background:{{ o.bg }};text-align:left;cursor:pointer">
+                            <span style="width:18px;height:18px;margin-top:1px;border-radius:50%;border:2px solid {{ o.ring }};display:grid;place-items:center;flex:0 0 auto"><span style="width:8px;height:8px;border-radius:50%;background:{{ o.dot }}"></span></span>
+                            <span style="display:flex;flex-direction:column">
+                              <span style="font-weight:600">{{ o.label }}</span>
+                              <span style="font-size:13px;color:#475264">{{ o.desc }}</span>
+                            </span>
+                          </button>
+                        </sc-for>
+                      </div>
+                      <label style="display:flex;flex-direction:column;gap:6px">
+                        <span style="display:flex;justify-content:space-between;font-size:13px;font-weight:500">Note<span style="font-weight:400;color:{{ noteHintFg }}">{{ noteHint }}</span></span>
+                        <textarea value="{{ note }}" onChange="{{ onNote }}" rows="3" placeholder="What evidence supports this decision?" style="resize:vertical;padding:10px;border:1px solid #d5d9e0;border-radius:8px;font-size:13px;outline-color:#2f6fed"></textarea>
+                      </label>
+                      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475264">
+                        <span style="width:24px;height:24px;border-radius:50%;background:#e8effd;color:#1d4fc4;display:grid;place-items:center;font-size:11px;font-weight:600">MZ</span>Signing as M. Zoratto
+                      </div>
+                      <button onClick="{{ askConfirm }}" style="height:42px;border:0;border-radius:8px;background:{{ submitBg }};color:{{ submitFg }};font-weight:600;cursor:{{ submitCursor }}">{{ submitLabel }}</button>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ ccDone }}" hint-placeholder-val="{{ false }}">
+                    <div style="background:#ffffff;border:1px solid #e2e5ea;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px">
+                      <h3 style="margin:0;font-size:16px;font-weight:600">Outcome</h3>
+                      <span style="align-self:flex-start;display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;background:{{ cc.stBg }};color:{{ cc.stFg }};font-size:13px;font-weight:600"><span style="width:7px;height:7px;border-radius:50%;background:{{ cc.stDot }}"></span>{{ cc.statusLabel }}</span>
+                      <sc-for list="{{ outcomeRows }}" as="or" hint-placeholder-count="3">
+                        <div style="display:flex;flex-direction:column;padding-top:8px;border-top:1px solid #edf0f3">
+                          <span style="font-size:12px;color:#5b6576">{{ or.k }}</span>
+                          <span style="text-wrap:pretty">{{ or.v }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </main>
+  </div>
+
+  <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ cancelConfirm }}" style="position:fixed;inset:0;z-index:50;background:rgba(14,21,37,.45);display:grid;place-items:center;padding:20px">
+      <div onClick="{{ stop }}" style="width:100%;max-width:440px;background:#ffffff;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;box-shadow:0 20px 50px rgba(14,21,37,.3)">
+        <h3 style="margin:0;font-size:18px;font-weight:600">{{ confirmTitle }}</h3>
+        <p style="margin:0;color:#475264;text-wrap:pretty">This records a human decision on {{ cc.id }} and resumes the workflow. The decision is added to the audit trail and can't be edited.</p>
+        <div style="padding:10px 12px;border-radius:8px;background:#f8f9fb;font-size:13px;color:#33405a">{{ noteEcho }}</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button onClick="{{ cancelConfirm }}" style="height:38px;padding:0 14px;border:1px solid #d5d9e0;border-radius:8px;background:#ffffff;font-weight:500;cursor:pointer">Cancel</button>
+          <button onClick="{{ submit }}" style="height:38px;padding:0 16px;border:0;border-radius:8px;background:{{ confirmBg }};color:#ffffff;font-weight:600;cursor:pointer">{{ confirmLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;right:20px;bottom:20px;z-index:60;max-width:calc(100vw - 40px);display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;background:#131a26;color:#ffffff;box-shadow:0 10px 30px rgba(14,21,37,.3);animation:toastIn .2s ease-out">
+      <span style="font-family:'Material Symbols Rounded';font-size:20px;color:#5fd39a">check_circle</span>
+      <span>{{ toast }}</span>
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#ffffff;color:#131a26;border-radius:4px;padding:1px 6px">B4 · st.toast</span></sc-if>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;review&quot;,&quot;overview&quot;,&quot;cases&quot;,&quot;process&quot;,&quot;about&quot;],&quot;default&quot;:&quot;review&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;emptyOverview&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+const NOW = new Date(2026,10,11,11,26,0);
+const ME = 'M. Zoratto';
+const REQ = 'Please provide the missing receiving confirmation, approved PO amendment, or a corrected invoice that reconciles the identified discrepancy.';
+const TYPE = {PRICE_VARIANCE:'Price variance',QUANTITY_VARIANCE:'Quantity variance',QUANTITY_EXCEEDS_RECEIPT:'Quantity exceeds receipt',MISSING_PO:'Missing PO',MISSING_GRN:'Missing goods receipt',DUPLICATE_INVOICE:'Duplicate invoice',SUPPLIER_MISMATCH:'Supplier mismatch',VALUE:'High-value invoice'};
+const ROOT = {PRICE_VARIANCE:['Invoiced price differs from the current purchase order','Approved PO amendment or corrected invoice'],QUANTITY_VARIANCE:['Invoice and receiving quantities differ','Receiving confirmation or corrected invoice'],QUANTITY_EXCEEDS_RECEIPT:['Invoice arrived before all quantities were received','Confirmation of remaining delivery or corrected invoice'],MISSING_PO:['No PO reference is available in ERP context','Valid PO number or approved non-PO purchase evidence'],MISSING_GRN:['Receipt posting may be incomplete or the delivery is outstanding','Goods receipt or service-entry confirmation'],SUPPLIER_MISMATCH:['Invoice supplier conflicts with the PO vendor master assignment','Buyer confirmation of the intended supplier']};
+const ACTION = {APPROVE:'Approve',REJECT:'Reject',REQUEST_INFO:'Request info',ESCALATE:'Escalate'};
+const ACTC = {APPROVE:['#14653f','#e3f3ea'],REJECT:['#a1122b','#fce7eb'],REQUEST_INFO:['#1d4fc4','#e8effd'],ESCALATE:['#7f4d00','#fcf1dc']};
+const SEVC = {CRITICAL:['#a1122b','#fce7eb'],MATERIAL:['#a6380f','#fcebe3'],WARNING:['#7f4d00','#fcf1dc'],INFO:['#33507a','#eaf0f8'],NONE:['#475264','#eef0f3']};
+const SEVBAR = {CRITICAL:'#d23a50',MATERIAL:'#e0703a',WARNING:'#d9a032',INFO:'#7f9cc4'};
+const SEVRANK = {CRITICAL:4,MATERIAL:3,WARNING:2,INFO:1};
+const STC = {review:['#7f4d00','#fcf1dc','#c98512'],Approved:['#14653f','#e3f3ea','#1f9a5e'],Rejected:['#a1122b','#fce7eb','#d23a50'],'Request info':['#1d4fc4','#e8effd','#2f6fed']};
+const EVT = {CASE_CREATED:'Case created',INVOICE_VALIDATED:'Invoice validated',ERP_CONTEXT_LOADED:'ERP context loaded',MATCH_COMPLETED:'Three-way match completed',EXCEPTION_IDENTIFIED:'Exception identified',INVESTIGATION_COMPLETED:'Investigation completed',RESOLUTION_PROPOSED:'Resolution proposed',CRITIQUE_FAILED:'Critique failed',RESOLUTION_REVISED:'Resolution revised',CRITIQUE_PASSED:'Critique passed',POLICY_CHECK_COMPLETED:'Policy check completed',HUMAN_REVIEW_REQUESTED:'Human review requested',HUMAN_DECISION_RECEIVED:'Human decision received',CASE_COMPLETED:'Case completed'};
+const SCEN = [
+ ['01','Exact match','Autonomous approval','INV-EXACT',1000,false],
+ ['02','Small price variance','Approval inside the configured dual tolerance','INV-SMALL',2525,false],
+ ['03','Large price variance','Investigate → critique → revise → human review','INV-LARGE',2200,true],
+ ['04','Quantity variance','Investigate and review','INV-QTY',2375,true],
+ ['05','Quantity exceeds receipt','Hard-control review','INV-OVER',1000,true],
+ ['06','Missing PO','Never auto-approve','INV-NOPO',200,true],
+ ['07','Missing goods receipt','Request evidence and review','INV-NOGRN',2500,true],
+ ['08','Duplicate invoice','Deterministic rejection','DUP-001',1000,false],
+ ['09','Supplier mismatch','Hard-control review','INV-SUP',1000,true],
+ ['10','Exact but high-value invoice','Value-threshold review','INV-HIGH',60000,false]
+];
+const B = o => Object.assign({po:null,poSup:null,poQty:null,poPrice:null,gr:null,grId:null,type:null,sev:null,ai:null,conf:null,status:'review',outcome:null,source:null,reviewer:null,decidedAfter:0,note:'',dup:false,loop:false},o);
+const RAW = [
+ B({id:'CASE-A41FE30749',sc:'03',inv:'INV-LARGE',sup:'Northstar Supply',supId:'SUP-002',po:'PO-1006',poSup:'SUP-002',qty:10,price:220,poQty:10,poPrice:200,gr:10,grId:'GR-1006',type:'PRICE_VARIANCE',sev:'MATERIAL',ai:'REQUEST_INFO',conf:0.88,age:134,loop:true}),
+ B({id:'CASE-7C2D19E0B1',sc:'10',inv:'INV-HIGH',sup:'Blue River Services',supId:'SUP-003',po:'PO-1005',poSup:'SUP-003',qty:1,price:60000,poQty:1,poPrice:60000,gr:1,grId:'GR-1005',type:'VALUE',sev:'WARNING',age:300}),
+ B({id:'CASE-3B90F4A6D2',sc:'09',inv:'INV-SUP',sup:'Northstar Supply',supId:'SUP-002',po:'PO-1001',poSup:'SUP-001',qty:10,price:100,poQty:10,poPrice:100,gr:10,grId:'GR-1001',type:'SUPPLIER_MISMATCH',sev:'CRITICAL',ai:'ESCALATE',conf:0.96,age:1620}),
+ B({id:'CASE-E15A7C8830',sc:'06',inv:'INV-NOPO',sup:'Acme Components',supId:'SUP-001',qty:2,price:100,type:'MISSING_PO',sev:'CRITICAL',ai:'ESCALATE',conf:0.72,age:26}),
+ B({id:'CASE-91F0B2C4E7',sc:'07',inv:'INV-NOGRN',sup:'Blue River Services',supId:'SUP-003',po:'PO-1004',poSup:'SUP-003',qty:5,price:500,poQty:5,poPrice:500,type:'MISSING_GRN',sev:'MATERIAL',ai:'REQUEST_INFO',conf:0.82,age:188}),
+ B({id:'CASE-58D3A1F0C9',sc:'05',inv:'INV-OVER',sup:'Acme Components',supId:'SUP-001',po:'PO-1002',poSup:'SUP-001',qty:20,price:50,poQty:20,poPrice:50,gr:10,grId:'GR-1002',type:'QUANTITY_EXCEEDS_RECEIPT',sev:'CRITICAL',ai:'REQUEST_INFO',conf:0.91,age:1870,status:'done',outcome:'Request info',source:'Human',reviewer:ME,decidedAfter:95,note:'Asked Acme to confirm the delivery date for the remaining 10 units.'}),
+ B({id:'CASE-6D1C0F9A72',sc:'04',inv:'INV-QTY',sup:'Northstar Supply',supId:'SUP-002',po:'PO-1003',poSup:'SUP-002',qty:95,price:25,poQty:100,poPrice:25,gr:100,grId:'GR-1003A, GR-1003B',type:'QUANTITY_VARIANCE',sev:'MATERIAL',ai:'REQUEST_INFO',conf:0.86,age:1440,status:'done',outcome:'Approved',source:'Human',reviewer:ME,decidedAfter:210,note:'Supplier invoiced 95 of 100 received; remaining 5 follow on a separate invoice.'}),
+ B({id:'CASE-0A4E6B7D21',sc:'01',inv:'INV-EXACT',sup:'Acme Components',supId:'SUP-001',po:'PO-1001',poSup:'SUP-001',qty:10,price:100,poQty:10,poPrice:100,gr:10,grId:'GR-1001',age:412,status:'done',outcome:'Approved',source:'Autonomous'}),
+ B({id:'CASE-C7B2E9D410',sc:'02',inv:'INV-SMALL',sup:'Northstar Supply',supId:'SUP-002',po:'PO-1003',poSup:'SUP-002',qty:100,price:25.25,poQty:100,poPrice:25,gr:100,grId:'GR-1003A, GR-1003B',type:'PRICE_VARIANCE',sev:'INFO',age:405,status:'done',outcome:'Approved',source:'Autonomous'}),
+ B({id:'CASE-2F6A8E3B55',sc:'08',inv:'DUP-001',sup:'Acme Components',supId:'SUP-001',po:'PO-1001',poSup:'SUP-001',qty:10,price:100,poQty:10,poPrice:100,gr:10,grId:'GR-1001',type:'DUPLICATE_INVOICE',sev:'CRITICAL',dup:true,age:398,status:'done',outcome:'Rejected',source:'Autonomous'})
+];
+
+const money = n => '€' + Number(n).toLocaleString('en-IE',{minimumFractionDigits:2,maximumFractionDigits:2});
+const dur = m => { m=Math.max(0,Math.round(m)); if(m<1) return 'just now'; if(m<60) return m+'m'; if(m<1440) return Math.floor(m/60)+'h '+(m%60)+'m'; return Math.floor(m/1440)+'d '+Math.floor((m%1440)/60)+'h'; };
+const hms = d => d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+const dayOf = d => { const y=new Date(NOW); y.setDate(y.getDate()-1); if(d.toDateString()===NOW.toDateString()) return 'Today, '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); if(d.toDateString()===y.toDateString()) return 'Yesterday, '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); return d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}); };
+const pctS = p => (p>0?'+':p<0?'−':'±')+Math.abs(p).toFixed(2)+'%';
+const sm = n => (n>0?'+':n<0?'−':'±')+money(Math.abs(n));
+const qf = n => String(n);
+
+function derive(c){
+  const total=c.qty*c.price, sk=c.status==='review'?'review':c.outcome, st=STC[sk], sv=SEVC[c.sev||'NONE'];
+  const updatedAgo = c.status==='review'?c.age:(c.source==='Human'?c.age-c.decidedAfter:c.age);
+  return Object.assign({},c,{total,totalText:money(total),isReview:c.status==='review',
+    statusLabel:sk==='review'?'Awaiting review':c.outcome+' · '+c.source, stFg:st[0],stBg:st[1],stDot:st[2],
+    sevLabel:c.sev||'—',sevFg:sv[0],sevBg:sv[1],typeLabel:c.type?TYPE[c.type]:'Exact match',
+    ageText:dur(c.age),updatedAgo,updatedText:dur(updatedAgo)+(updatedAgo<1?'':' ago'),
+    confText:c.ai?c.conf.toFixed(2):'—',confW:c.ai?Math.round(c.conf*100)+'%':'0%',poText:c.po||'No PO',
+    created:new Date(NOW-c.age*60000),
+    priority:(SEVRANK[c.sev]||1)*30+Math.log10(total)*10+Math.min(c.age/60,24)*2});
+}
+function mx(c){
+  const hasPo=!!c.po, hasGr=c.gr!=null;
+  const unitVar=hasPo?c.price-c.poPrice:null, pricePct=hasPo?unitVar/c.poPrice*100:null, lineAbs=hasPo?unitVar*c.qty:null;
+  const priceOk=hasPo?(Math.abs(pricePct)<=2&&Math.abs(lineAbs)<=25):null;
+  const qtyPct=hasGr?(c.qty-c.gr)/c.gr*100:null, qtyOk=hasGr?Math.abs(qtyPct)<=1:null, orderOk=hasPo?c.qty<=c.poQty:null;
+  return {hasPo,hasGr,unitVar,pricePct,lineAbs,priceOk,qtyPct,qtyOk,orderOk};
+}
+function rules(c,m){
+  const t=c.total;
+  return [
+    {rule:'Price variance within tolerance',thr:'≤ 2% and ≤ €25.00 per line',act:m.hasPo?pctS(m.pricePct)+' · '+sm(m.lineAbs):'No PO to compare',pass:m.priceOk},
+    {rule:'Quantity within receipt tolerance',thr:'≤ 1% vs received',act:m.hasGr?pctS(m.qtyPct)+' ('+c.qty+' vs '+c.gr+')':'No receipt',pass:m.hasGr?m.qtyOk:(m.hasPo?false:null)},
+    {rule:'Quantity within PO order',thr:'≤ ordered quantity',act:m.hasPo?c.qty+' of '+c.poQty:'No PO',pass:m.orderOk},
+    {rule:'Purchase order exists and is OPEN',thr:'Required',act:m.hasPo?c.po+' · OPEN':'Not referenced',pass:m.hasPo},
+    {rule:'Goods receipt posted',thr:'Required',act:c.grId||'None found',pass:m.hasPo?m.hasGr:null},
+    {rule:'Supplier matches PO and is active',thr:'Required',act:!m.hasPo?c.supId+' · active':(c.supId===c.poSup?c.supId+' · active':c.supId+' ≠ '+c.poSup),pass:m.hasPo?c.supId===c.poSup:null},
+    {rule:'Not a duplicate invoice',thr:'Duplicates auto-reject',act:c.dup?'Matches DUP-001 (10 Aug)':'No prior match',pass:!c.dup},
+    {rule:'Invoice value below review threshold',thr:'< €50,000.00',act:money(t),pass:t<50000},
+    {rule:'Model confidence',thr:'≥ 0.90 to auto-resolve',act:c.ai?c.conf.toFixed(2):'AI not invoked',pass:c.ai?c.conf>=0.9:null}
+  ];
+}
+function attemptsOf(c){
+  if(!c.ai) return [];
+  const pass={critTitle:'Critic passed',critIcon:'verified',critFg:'#14653f',critBg:'#f0f8f3',issues:['Recommendation is grounded in matcher evidence.'],changes:[]};
+  const base=a=>Object.assign({actBg:ACTC[a.act][1],actFg:ACTC[a.act][0],action:ACTION[a.act],strike:'none',border:'#e2e5ea',hasRequest:!!a.request},a);
+  const final=base(Object.assign({n:c.loop?2:1,act:c.ai,conf:c.conf.toFixed(2),rationale:'The structured evidence supports '+c.ai+'; no financial action is executed until deterministic policy authorization.',request:c.ai==='REQUEST_INFO'?REQ:null},pass));
+  if(!c.loop) return [final];
+  const first=base({n:1,act:'APPROVE',conf:'0.95 → 0.75',rationale:'The price difference may represent an expected commercial update.',request:null,critTitle:'Critic rejected · confidence −0.20',critIcon:'gpp_bad',critFg:'#a1122b',critBg:'#fdf1f3',issues:['APPROVE is unsupported while a material discrepancy remains unresolved.'],changes:['Request documentary evidence or escalate for human review.']});
+  first.strike='line-through'; first.border='#f2c4cc';
+  return [first,final];
+}
+function eventsOf(c,fails){
+  const ev=[]; let t=0;
+  const add=(k,actor,dt,data)=>{t+=dt;ev.push({k,actor,t,dt,data});};
+  add('CASE_CREATED','workflow',0,{case_id:c.id,invoice_id:c.inv,supplier_id:c.supId});
+  add('INVOICE_VALIDATED','domain',42,{lines:'1',total:money(c.total),currency:'EUR'});
+  add('ERP_CONTEXT_LOADED','erp_repository',108,{purchase_order:c.po||'none',goods_receipts:c.grId||'none',supplier_active:'true'});
+  const disc=c.type&&c.type!=='VALUE'?1:0;
+  add('MATCH_COMPLETED','three_way_matcher',21,{matched:String(!disc),discrepancies:String(disc),checked_lines:'1'});
+  if(disc&&c.sev!=='INFO') add('EXCEPTION_IDENTIFIED','three_way_matcher',3,{type:c.type,severity:c.sev});
+  if(c.ai){
+    add('INVESTIGATION_COMPLETED','ai_investigator',1840,{root_cause:ROOT[c.type][0],suggested_action:c.ai,confidence:c.conf.toFixed(2)});
+    if(c.loop){
+      add('RESOLUTION_PROPOSED','ai_resolution_agent',1210,{attempt:'1',action:'APPROVE',confidence:'0.95'});
+      add('CRITIQUE_FAILED','ai_critic',930,{issue:'APPROVE is unsupported while a material discrepancy remains unresolved.',confidence_adjustment:'−0.20'});
+      add('RESOLUTION_REVISED','ai_resolution_agent',1290,{attempt:'2',action:c.ai,confidence:c.conf.toFixed(2)});
+    } else add('RESOLUTION_PROPOSED','ai_resolution_agent',1210,{attempt:'1',action:c.ai,confidence:c.conf.toFixed(2)});
+    add('CRITIQUE_PASSED','ai_critic',860,{reflection_cycles:c.loop?'1':'0'});
+  }
+  const human=c.status==='review'||c.source==='Human';
+  add('POLICY_CHECK_COMPLETED','policy_engine',14,{permitted:String(!human),requires_human_review:String(human),failed_rules:String(fails)});
+  if(human) add('HUMAN_REVIEW_REQUESTED','workflow',6,{assigned_to:ME});
+  if(c.status==='done'){
+    if(c.source==='Human') add('HUMAN_DECISION_RECEIVED',c.reviewer,Math.max(c.decidedAfter*60000-t,1000),{action:c.outcome,reviewer:c.reviewer,comment:c.note||'—'});
+    add('CASE_COMPLETED','workflow',35,{outcome:c.outcome,source:c.source==='Human'?'HUMAN':'AUTONOMOUS'});
+  }
+  const created=new Date(NOW-c.age*60000);
+  return ev.map((e,i)=>{const d=new Date(+created+e.t);return {k:e.k,name:EVT[e.k],actor:e.actor,time:hms(d),rel:dur((NOW-d)/60000)+((NOW-d)<60000?'':' ago'),delta:i===0?'start':(e.dt<60000?'+'+(e.dt/1000).toFixed(2)+' s':'+'+dur(e.dt/60000)),day:dayOf(d),data:Object.keys(e.data).map(k=>({k,v:e.data[k]})),dot:e.k==='CRITIQUE_FAILED'?'#d23a50':(e.k==='HUMAN_REVIEW_REQUESTED'||e.k==='EXCEPTION_IDENTIFIED')?'#c98512':e.k.indexOf('HUMAN_DECISION')===0?'#2f6fed':'#1f9a5e'};});
+}
+
+class Component extends DCLogic {
+  state = {screen:null,caseId:'CASE-A41FE30749',tab:null,filter:'all',q:'',sortKey:'updated',sortDir:1,decision:null,note:'',confirm:false,toast:null,evSel:null,pStep:0,pSc:null,pErr:false,ranAll:false,cases:RAW.map(c=>Object.assign({},c)),vw:typeof window!=='undefined'?window.innerWidth:1400};
+  componentDidMount(){ this._r=()=>this.setState({vw:window.innerWidth}); window.addEventListener('resize',this._r); }
+  componentWillUnmount(){ window.removeEventListener('resize',this._r); clearTimeout(this._t); }
+  showToast(msg){ clearTimeout(this._t); this.setState({toast:msg}); this._t=setTimeout(()=>this.setState({toast:null}),4500); }
+  go(screen){ this.setState({screen,confirm:false}); window.scrollTo(0,0); }
+  open(id,screen){ this.setState({caseId:id,screen,tab:null,evSel:null,decision:null,note:'',confirm:false}); window.scrollTo(0,0); }
+  submit(){
+    const s=this.state, id=this._ccId, label=ACTION[s.decision];
+    const outcome={APPROVE:'Approved',REJECT:'Rejected',REQUEST_INFO:'Request info'}[s.decision];
+    const cases=s.cases.map(c=>c.id===id?Object.assign({},c,{status:'done',outcome,source:'Human',reviewer:ME,decidedAfter:c.age,note:s.note.trim()}):c);
+    const q=cases.filter(c=>c.status==='review').map(derive).sort((a,b)=>b.priority-a.priority);
+    const inv=s.cases.find(c=>c.id===id).inv;
+    const stay=this._screen!=='review';
+    this.setState({cases,confirm:false,decision:null,note:'',caseId:stay?id:(q[0]?q[0].id:null),tab:null,evSel:null});
+    this.showToast(label+' recorded for '+inv+' · '+q.length+' left in queue');
+  }
+  renderVals(){
+    const s=this.state, p=this.props;
+    const screen=s.screen||p.startScreen||'review'; this._screen=screen;
+    const showNotes=p.showNotes??false;
+    const empty=!s.ranAll&&(p.emptyOverview??false);
+    const wide=s.vw>=960;
+    const all=s.cases.map(derive);
+    const queue=all.filter(c=>c.isReview).sort((a,b)=>b.priority-a.priority);
+    let cc=all.find(c=>c.id===s.caseId)||null;
+    if(screen==='review'&&(!cc||!cc.isReview)) cc=queue[0]||null;
+    this._ccId=cc&&cc.id;
+
+    const nav=[['overview','Overview','space_dashboard'],['process','Process invoice','upload_file'],['review','Review queue','fact_check'],['cases','Cases','receipt_long'],['about','About','info']].map(([k,l,i])=>{const act=screen===k||(k==='cases'&&screen==='case');return {label:l,icon:i,go:()=>this.go(k),bg:act?'#2f6fed':'transparent',fg:act?'#ffffff':'#c9d3e6',hasCount:k==='review'&&queue.length>0,count:queue.length,badgeBg:act?'#1d4fc4':'#c98512'};});
+    const crumbMap={overview:['Overview'],process:['Process invoice'],review:['Review queue',cc?cc.inv:null],cases:['Cases'],case:['Cases',cc?cc.id:null],about:['About']};
+    const cl=(crumbMap[screen]||[]).filter(Boolean);
+    const crumbs=cl.map((l,i)=>({label:l,hasSep:i>0,fg:i===cl.length-1?'#131a26':'#475264',fw:i===cl.length-1?600:400,go:()=>{ if(i===0) this.go(screen==='case'?'cases':screen); }}));
+    const urlPath={overview:'/',process:'/process',review:'/review',cases:'/cases',case:'/cases',about:'/about'}[screen];
+    const url=urlPath+((screen==='review'||screen==='case')&&cc?'?case='+cc.id:(screen==='cases'&&s.filter!=='all'?'?status='+s.filter:''));
+
+    const done=all.filter(c=>!c.isReview), auto=done.filter(c=>c.source==='Autonomous'), human=done.filter(c=>c.source==='Human');
+    const overr=human.filter(c=>c.ai&&!c.outcome.startsWith(ACTION[c.ai]));
+    const atRisk=queue.reduce((a,c)=>a+c.total,0);
+    const ages=queue.map(c=>c.age).sort((a,b)=>a-b), median=ages.length?ages[Math.floor(ages.length/2)]:0;
+    const kpis=[
+      {label:'Awaiting review',value:String(queue.length),note:queue.length?'Oldest waiting '+dur(ages[ages.length-1]):'Queue clear',hasTrend:true,trend:'+2 since yesterday',trendIcon:'trending_up',trendFg:'#a6380f'},
+      {label:'Value at risk',value:money(atRisk),note:'Invoice value paused for review',hasTrend:false},
+      {label:'Auto-resolution rate',value:Math.round(auto.length/all.length*100)+'%',note:auto.length+' of '+all.length+' without a reviewer',hasTrend:true,trend:'+10 pts this week',trendIcon:'trending_up',trendFg:'#14653f'},
+      {label:'Median wait',value:dur(median),note:'Since the case was paused',hasTrend:false},
+      {label:'Human override rate',value:human.length?Math.round(overr.length/human.length*100)+'%':'—',note:overr.length+' of '+human.length+' decisions differed from AI',hasTrend:false}
+    ];
+    const queueRows=queue.map(c=>{const sel=cc&&c.id===cc.id&&screen==='review';return Object.assign({},c,{open:()=>this.open(c.id,'review'),bg:sel?'#f1f5fd':'#ffffff',border:sel?'#2f6fed':'#e2e5ea',shadow:sel?'0 0 0 3px #e8effd':'none',ageFg:c.age>1440?'#a1122b':'#5b6576'});});
+    const maxAge=Math.max(1440*1.15,...queue.map(c=>c.age));
+    const waitBars=[...queue].sort((a,b)=>b.age-a.age).map(c=>({inv:c.inv,ageText:dur(c.age),w:(c.age/maxAge*100).toFixed(1)+'%',color:SEVBAR[c.sev]||'#7f9cc4',fg:c.age>1440?'#a1122b':'#33405a',fw:c.age>1440?600:400}));
+    const slaLeft=(1440/maxAge*100).toFixed(1)+'%';
+    const oc=[['Awaiting review','#d9a032',queue,'paused'],['Approved','#1f9a5e',done.filter(c=>c.outcome==='Approved'),'auto + human'],['Rejected','#d23a50',done.filter(c=>c.outcome==='Rejected'),'released reservations'],['Request info','#2f6fed',done.filter(c=>c.outcome==='Request info'),'evidence requested']];
+    const outcomes=oc.map(([l,col,list,sub])=>({label:l,color:col,count:list.length,w:(list.length/all.length*100)+'%',value:money(list.reduce((a,c)=>a+c.total,0)),sub}));
+
+    // Cases table
+    const fdefs=[['all','All',()=>true],['review','Awaiting review',c=>c.isReview],['Approved','Approved',c=>c.outcome==='Approved'],['Rejected','Rejected',c=>c.outcome==='Rejected'],['Request info','Request info',c=>c.outcome==='Request info']];
+    const filters=fdefs.map(([k,l,fn])=>{const a=s.filter===k;return {label:l,count:all.filter(fn).length,go:()=>this.setState({filter:k}),bg:a?'#131a26':'#ffffff',fg:a?'#ffffff':'#33405a',border:a?'#131a26':'#d5d9e0'};});
+    const ffn=fdefs.find(f=>f[0]===s.filter)[2], q=s.q.trim().toLowerCase();
+    const sk={id:c=>c.id,sup:c=>c.sup,total:c=>c.total,sev:c=>SEVRANK[c.sev]||0,conf:c=>c.conf||0,status:c=>c.statusLabel,updated:c=>-c.updatedAgo};
+    const rows=all.filter(ffn).filter(c=>!q||[c.id,c.inv,c.sup,c.po||''].join(' ').toLowerCase().includes(q)).sort((a,b)=>{const x=sk[s.sortKey](a),y=sk[s.sortKey](b);return (x>y?-1:x<y?1:0)*s.sortDir;});
+    const tableRows=rows.map(c=>Object.assign({},c,{open:()=>this.open(c.id,'case')}));
+    const cols=[['id','Case','flex-start'],['sup','Supplier · invoice','flex-start'],['total','Amount','flex-end'],['sev','Exception','flex-start'],['conf','AI confidence','flex-start'],['status','Status','flex-start'],['updated','Updated','flex-start']].map(([k,l,j])=>{const a=s.sortKey===k;return {label:l,justify:j,fg:a?'#131a26':'#475264',icon:a?(s.sortDir===1?'arrow_downward':'arrow_upward'):'unfold_more',go:()=>this.setState(st=>({sortKey:k,sortDir:st.sortKey===k?-st.sortDir:1}))};});
+
+    // Process
+    const scenarios=SCEN.map(([k,name,exp,inv,amt,ai])=>({k,name,exp,inv,amt:money(amt),tag:ai?'AI + review':(k==='10'?'Value review':'Deterministic'),tagBg:ai?'#e8effd':'#eef0f3',tagFg:ai?'#1d4fc4':'#475264',pick:()=>this.setState({pSc:k,pStep:1,pErr:false})}));
+    const pS=SCEN.find(x=>x[0]===s.pSc)||SCEN[2];
+    const pSc={k:pS[0],name:pS[1],inv:pS[3]};
+    const pRaw=all.find(c=>c.sc===pS[0]);
+    const stepDefs=['Choose invoice','Validate','Run workflow'];
+    const steps=stepDefs.map((l,i)=>{const d=i<s.pStep,a=i===s.pStep;return {label:l,hasLine:i<2,border:a?'#2f6fed':'#d5d9e0',bg:a?'#f1f5fd':'#ffffff',fg:a||d?'#131a26':'#5b6576',op:i>s.pStep?0.55:1,cursor:d?'pointer':(a?'default':'not-allowed'),dotBg:d?'#1f9a5e':(a?'#2f6fed':'#e2e5ea'),dotFg:d||a?'#ffffff':'#5b6576',dot:d?'check':String(i+1),dotFont:d?"'Material Symbols Rounded'":"'IBM Plex Sans'",dotSize:d?'16px':'12px',go:()=>{ if(d) this.setState({pStep:i}); }};});
+    const pc=pRaw;
+    const valChecks=[{f:'schema',d:'All required fields present; types valid'},{f:'invoice_id',d:pc.inv+' (normalised to upper case)'},{f:'line_items[0]',d:pc.qty+' × '+money(pc.price)+' = '+money(pc.total)},{f:'subtotal',d:'Sum of line totals = '+money(pc.total)},{f:'total',d:'Subtotal + tax (€0.00) = '+money(pc.total)},{f:'currency',d:'EUR'}];
+    const valErrors=[{f:'line_items[0].line_total',m:'Must equal quantity × unit price ('+money(pc.total)+'). Received €2,020.00.'},{f:'total',m:'Does not equal subtotal plus tax.'},{f:'currency',m:'Must be 3 letters. Received "EURO".'}];
+    const pEvents=eventsOf(pc,rules(pc,mx(pc)).filter(r=>r.pass===false).length).map(e=>({name:e.name,delta:e.delta,dot:e.dot}));
+
+    // Case detail
+    let detail={};
+    if(cc){
+      const m=mx(cc), rl=rules(cc,m), fails=rl.filter(r=>r.pass===false).length, ev=eventsOf(cc,fails), at=attemptsOf(cc);
+      const ic=ok=>ok===true?['check_circle','#1f9a5e']:ok===false?['cancel','#c23b4a']:['remove','#5b6576'];
+      const checks=[
+        {l:'Supplier',v:!m.hasPo?cc.supId+' · no PO to compare':(cc.supId===cc.poSup?cc.supId+' matches PO':cc.supId+' ≠ PO vendor '+cc.poSup),ok:m.hasPo?cc.supId===cc.poSup:null},
+        {l:'Currency',v:m.hasPo?'EUR = EUR':'EUR',ok:true},
+        {l:'Purchase order',v:m.hasPo?cc.po+' · OPEN':'Not referenced',ok:m.hasPo},
+        {l:'Goods receipt',v:m.hasGr?cc.grId:(m.hasPo?'None posted':'n/a'),ok:m.hasPo?m.hasGr:null},
+        {l:'Duplicate check',v:cc.dup?'Matches DUP-001 from 10 Aug':'No prior invoice',ok:!cc.dup}
+      ].map(x=>Object.assign(x,{icon:ic(x.ok)[0],color:ic(x.ok)[1]}));
+      const res=(ok,missing)=>ok===true?['Within tolerance','check_circle','#14653f']:missing?['Cannot compare','help','#7f4d00']:['Exceeds tolerance','cancel','#a1122b'];
+      const qOk=m.hasGr?(m.qtyOk&&m.orderOk!==false):false;
+      const mr=[
+        {f:'Quantity',inv:qf(cc.qty),po:m.hasPo?qf(cc.poQty):'—',gr:m.hasGr?qf(cc.gr):'Not received',varT:m.hasGr?(cc.qty-cc.gr>=0?'+':'−')+Math.abs(cc.qty-cc.gr)+' units · '+pctS(m.qtyPct):'No receipt to compare',tol:'≤ 1% vs receipt · ≤ ordered',ok:qOk,missing:!m.hasGr},
+        {f:'Unit price',inv:money(cc.price),po:m.hasPo?money(cc.poPrice):'—',gr:'—',varT:m.hasPo?sm(m.unitVar)+' / unit · '+pctS(m.pricePct):'No PO to compare',tol:'≤ 2% and ≤ €25.00 per line',ok:m.priceOk,missing:!m.hasPo},
+        {f:'Line total',inv:money(cc.total),po:m.hasPo?money(cc.qty*cc.poPrice):'—',gr:'—',varT:m.hasPo?sm(m.lineAbs)+' at invoiced qty':'—',tol:'Checked against €25.00',ok:m.priceOk,missing:!m.hasPo}
+      ];
+      const matchRows=mr.map(r=>{const z=res(r.ok,r.missing);const bad=r.ok!==true;return Object.assign(r,{res:z[0],resIcon:z[1],resFg:z[2],invBg:bad?(r.missing?'#fdf6e7':'#fdecef'):'transparent',invFg:bad&&!r.missing?'#a1122b':'#131a26',invFw:bad?600:400,varFg:bad&&!r.missing?'#a1122b':(r.ok===true&&r.varT.indexOf('±')!==0?'#14653f':'#475264')});});
+      const did='DISC-'+cc.id.slice(5,13);
+      const dtext={PRICE_VARIANCE:'Unit price '+money(cc.price)+' vs PO price '+money(cc.poPrice)+': '+sm(m.unitVar)+' per unit ('+pctS(m.pricePct||0)+'), '+sm(m.lineAbs||0)+' on the line.',QUANTITY_VARIANCE:'Invoiced quantity '+cc.qty+' differs from received quantity '+cc.gr+' ('+pctS(m.qtyPct||0)+').',QUANTITY_EXCEEDS_RECEIPT:'Invoiced quantity '+cc.qty+' exceeds received quantity '+cc.gr+' on '+cc.grId+'.',MISSING_PO:'The invoice does not reference a purchase order.',MISSING_GRN:'No goods receipt is posted against '+cc.po+'.',SUPPLIER_MISMATCH:'Invoice supplier '+cc.supId+' does not match PO vendor '+cc.poSup+'.',DUPLICATE_INVOICE:'Invoice DUP-001 was already recorded for '+cc.supId+' on 10 Aug 2026.'};
+      const hasDisc=!!cc.type&&cc.type!=='VALUE';
+      const sv=SEVC[cc.sev||'NONE'];
+      const disc={sev:cc.sevLabel,title:TYPE[cc.type],text:dtext[cc.type],id:did,fg:sv[0],bg:sv[1]};
+      const human=cc.isReview||cc.source==='Human';
+      const verdict=cc.dup?{text:'Duplicate control enforced rejection without AI.',icon:'block',bg:'#fce7eb',fg:'#8f1026'}:human?{text:fails+' of '+rl.length+' rules failed. Autonomous action not permitted; routed to human review.',icon:'person_alert',bg:'#fcf1dc',fg:'#6b4100'}:{text:'All rules passed. Autonomous approval permitted.',icon:'verified',bg:'#e3f3ea',fg:'#0f5434'};
+      const rulesV=rl.map(r=>{const z=ic(r.pass);return Object.assign({},r,{icon:z[0],color:z[1],actFg:r.pass===false?'#a1122b':'#33405a',actFw:r.pass===false?600:400});});
+      const tab=s.tab||(cc.loop?'ai':'match');
+      const tabs=[['match','Three-way match',hasDisc?'1 exception':(cc.type==='VALUE'?'Matched':'Matched')],['ai','AI reasoning',cc.ai?(cc.loop?'2 attempts':'1 attempt'):'Not used'],['policy','Policy',fails?fails+' failed':'All passed'],['timeline','Audit timeline',String(ev.length)]].map(([k,l,b])=>{const a=tab===k;const warn=(k==='policy'&&fails)||(k==='ai'&&cc.loop)||(k==='match'&&hasDisc);return {label:l,badge:b,line:a?'#2f6fed':'transparent',fg:a?'#131a26':'#475264',fw:a?600:500,badgeBg:warn?'#fcf1dc':'#eef0f3',badgeFg:warn?'#7f4d00':'#475264',go:()=>this.setState({tab:k})};});
+      const selI=s.evSel==null?ev.length-1:Math.min(s.evSel,ev.length-1);
+      const events=ev.map((e,i)=>Object.assign({},e,{bg:i===selI?'#f1f5fd':'transparent',select:()=>this.setState({evSel:i})}));
+      const recC=cc.ai?ACTC[cc.ai]:['#475264','#eef0f3'];
+      const rec={label:cc.ai?ACTION[cc.ai]:'No AI recommendation',fg:recC[0],bg:recC[1],conf:cc.ai?'confidence '+cc.conf.toFixed(2):'',w:cc.ai?Math.round(cc.conf*100)+'%':'0%',note:cc.loop?'Revised once after the Critic rejected Approve. Policy requires review.':(cc.ai?'Below the 0.90 gate or a hard control applies. Policy requires review.':'Paused by the value threshold (≥ €50,000.00).')};
+      const opts=[['APPROVE','Approve','Accept the invoice as billed'],['REQUEST_INFO','Request info','Ask for evidence; reservations are kept'],['REJECT','Reject','Return the invoice; releases reserved quantities']];
+      const decisionOpts=opts.map(([k,l,d])=>{const a=s.decision===k;return {label:l,desc:d+(cc.ai===k?' · matches AI':''),border:a?'#2f6fed':'#e2e5ea',bg:a?'#f1f5fd':'#ffffff',ring:a?'#2f6fed':'#9aa3b2',dot:a?'#2f6fed':'transparent',pick:()=>this.setState({decision:k})};});
+      const needNote=s.decision==='APPROVE'||s.decision==='REJECT';
+      const canSubmit=!!s.decision&&(!needNote||s.note.trim().length>=3);
+      const created=new Date(NOW-cc.age*60000);
+      const headerMeta=[
+        {k:'Amount',v:cc.totalText},
+        {k:'Purchase order',v:cc.poText},
+        {k:'Exception',v:cc.typeLabel,hasChip:!!cc.sev,chip:cc.sevLabel,chipFg:cc.sevFg,chipBg:cc.sevBg},
+        {k:cc.isReview?'Open for':'Created',v:cc.isReview?dur(cc.age):dayOf(created)+' '+hms(created).slice(0,5)},
+        {k:cc.isReview?'Assigned to':'Decided by',v:cc.isReview?ME:(cc.source==='Human'?cc.reviewer:'Policy engine')}
+      ];
+      const outcomeRows=[
+        {k:'Decision source',v:cc.source==='Human'?'Human review by '+cc.reviewer+', '+dur(cc.decidedAfter)+' after the case opened':'Autonomous · all policy rules permitted the action'},
+        {k:'AI recommendation',v:cc.ai?ACTION[cc.ai]+' (confidence '+cc.conf.toFixed(2)+')'+(cc.source==='Human'&&!cc.outcome.startsWith(ACTION[cc.ai])?' · overridden':''):'AI not invoked'},
+        {k:'Note',v:cc.note||'—'}
+      ];
+      detail={cc,checks,matchRows,hasDisc,disc,rules:rulesV,verdict,tabs,tabMatch:tab==='match',tabAi:tab==='ai',tabPolicy:tab==='policy',tabTimeline:tab==='timeline',
+        hasAi:!!cc.ai,noAi:!cc.ai,noAiText:cc.dup?'Duplicate invoices are rejected deterministically. No interpretation is needed.':(cc.type==='VALUE'?'The invoice matched exactly. Policy paused it because the value is at or above €50,000.00.':'Nothing ambiguous to interpret, so the workflow went straight to policy.'),
+        loopTitle:cc.loop?'The Critic rejected the first proposal and forced a revision':'Proposal accepted by the Critic on the first attempt',
+        invest:cc.ai?{root:ROOT[cc.type][0],missing:ROOT[cc.type][1],action:ACTION[cc.ai],conf:cc.conf.toFixed(2)}:{},
+        attempts:at,hasDiff:cc.loop,diff:[{f:'Action',a:'Approve',b:'Request info'},{f:'Confidence',a:'0.95 (0.75 after Critic)',b:'0.88'},{f:'Information request',a:'None',b:'PO amendment or corrected invoice'},{f:'Rationale',a:'Assumes an unrecorded commercial update',b:'Cites matcher evidence; defers to policy'}],
+        events,evSel:events[selI],tlDay:ev[0].day,rec,decisionOpts,
+        noteHint:!s.decision?'Choose a decision first':(needNote?'Required for '+ACTION[s.decision]:'Optional'),noteHintFg:needNote&&!canSubmit?'#a6380f':'#5b6576',
+        submitBg:canSubmit?'#2f6fed':'#e2e5ea',submitFg:canSubmit?'#ffffff':'#5b6576',submitCursor:canSubmit?'pointer':'not-allowed',submitLabel:s.decision?'Submit: '+ACTION[s.decision]:'Select a decision',
+        askConfirm:()=>{ if(canSubmit) this.setState({confirm:true}); },
+        confirmTitle:s.decision?ACTION[s.decision]+' '+cc.inv+'?':'',confirmLabel:s.decision?'Confirm '+ACTION[s.decision].toLowerCase():'Confirm',confirmBg:s.decision==='REJECT'?'#c23b4a':'#2f6fed',noteEcho:s.note.trim()?'Note: '+s.note.trim():'No note added.',
+        headerMeta,outcomeRows,ccReview:cc.isReview,ccDone:!cc.isReview};
+    }
+
+    return Object.assign({
+      showNotes,wide,nav,crumbs,url,queueCount:queue.length,
+      shellDir:wide?'row':'column',sideW:wide?'248px':'100%',sideDir:wide?'column':'row',sideAlign:wide?'stretch':'center',sideGap:wide?'28px':'10px 20px',sidePad:wide?'24px 14px':'10px 16px',sideH:wide?'100vh':'auto',navDir:wide?'column':'row',barTop:wide?'0':'0',
+      queueMax:wide?'320px':'none',queuePos:wide?'sticky':'static',panelMax:wide?'380px':'none',panelPos:wide?'sticky':'static',
+      runtime:[{k:'Mode',v:'Demo'},{k:'Model',v:'Mock provider'},{k:'Rules',v:'business_rules.yaml'},{k:'Reflection limit',v:'3'}],
+      runtimeFull:[{k:'Mode',v:'Demo · deterministic mock provider'},{k:'Live model',v:'Not used in demo mode'},{k:'Rules',v:'config/business_rules.yaml'},{k:'Reflection limit',v:'3 iterations'},{k:'Storage',v:'SQLite · data/demo/p2p.db'}],
+      owners:[['Schema and invoice arithmetic','Deterministic domain logic','#475264'],['PO, receipt, supplier and duplicate lookup','Deterministic repository','#475264'],['Price and quantity variance','Deterministic matcher','#475264'],['Thresholds and action authorization','Deterministic policy','#475264'],['Root-cause synthesis','AI Investigator','#1d4fc4'],['Proposed resolution or information request','AI Resolution Agent','#1d4fc4'],['Evidence and recommendation critique','AI Critic','#1d4fc4'],['Protected decision','Human reviewer','#14653f']].map(([r,o,fg])=>({r,o,fg})),
+      isOverview:screen==='overview',isProcess:screen==='process',isCases:screen==='cases',isAbout:screen==='about',isReview:screen==='review',showWork:screen==='review'||screen==='case',
+      hasCase:!!cc&&(screen==='review'||screen==='case'),noCase:!cc&&screen==='review',queueEmpty:queue.length===0,
+      empty,notEmpty:!empty,nowLabel:'11 Nov, 11:26',kpis,queueRows,waitBars,slaLeft,outcomes,
+      filters,cols,tableRows,noRows:rows.length===0,q:s.q,onSearch:e=>this.setState({q:e.target.value}),
+      scenarios,steps,pStep0:s.pStep===0,pStep1:s.pStep===1,pStep2:s.pStep===2,pSc,pCase:pRaw,valChecks,valErrors,pValid:!s.pErr,pErr:s.pErr,
+      errToggleLabel:s.pErr?'Show valid result':'Preview error state',toggleErr:()=>this.setState({pErr:!s.pErr}),
+      runBg:s.pErr?'#b9c3d6':'#2f6fed',runCursor:s.pErr?'not-allowed':'pointer',runWorkflow:()=>{ if(!s.pErr) this.setState({pStep:2}); },
+      stepBack:()=>this.setState({pStep:0}),processAnother:()=>this.setState({pStep:0,pSc:null}),openPCase:()=>this.open(pRaw.id,pRaw.isReview?'review':'case'),pEvents,
+      goProcess:()=>this.go('process'),goReview:()=>this.go('review'),goCases:()=>this.go('cases'),
+      runAll:()=>{ this.setState({ranAll:true}); this.showToast('10 scenarios processed · '+queue.length+' need review'); },
+      note:s.note,onNote:e=>this.setState({note:e.target.value}),
+      confirmOpen:s.confirm&&!!cc,cancelConfirm:()=>this.setState({confirm:false}),stop:e=>e.stopPropagation(),submit:()=>this.submit(),
+      copyLink:()=>{ try{navigator.clipboard.writeText('http://127.0.0.1:8501'+url);}catch(e){} this.showToast('Link copied: '+url); },
+      hasToast:!!s.toast,toast:s.toast
+    },detail);
+  }
+}
+</script>
+</body>
+</html>
