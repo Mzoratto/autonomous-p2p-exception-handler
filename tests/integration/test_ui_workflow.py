@@ -1,12 +1,17 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
+from langgraph.types import Command
+from streamlit.elements.lib import policies
 from streamlit.testing.v1 import AppTest
 
 from p2p.application.service import CaseService, create_runtime
-from p2p.domain.models import DecisionType
+from p2p.domain.models import DecisionType, HumanReview
 from p2p.infrastructure.database import demo_invoices
+
+REVIEWER = "Ana Reviewer"
 
 REPO = Path(__file__).parents[2]
 PAGES = "src/p2p/ui/pages"
@@ -48,6 +53,62 @@ def run_scenario(at: AppTest, key: str) -> str:
 
 def keys(widgets) -> set[str]:
     return {widget.key for widget in widgets}
+
+
+def test_recovery_prefills_and_finishes_the_submitted_review(database_url, monkeypatch, caplog):
+    monkeypatch.setenv("P2P_REVIEWER_NAME", REVIEWER)
+    runtime = create_runtime(database_url=database_url, demo_mode=True)
+    try:
+        service = CaseService(runtime)
+        case_id = service.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
+        invoke = runtime.graph.invoke
+
+        def resume_fails(graph_input, *args, **kwargs):
+            if isinstance(graph_input, Command):
+                raise OSError("injected resume failure")
+            return invoke(graph_input, *args, **kwargs)
+
+        monkeypatch.setattr(runtime.graph, "invoke", resume_fails)
+        with pytest.raises(OSError):
+            service.review_case(
+                case_id,
+                HumanReview(reviewer=REVIEWER, action=DecisionType.REJECT, comment="dup"),
+                checkpoint_id=service.get_case(case_id)["checkpoint_id"],
+            )
+        monkeypatch.setattr(runtime.graph, "invoke", invoke)
+        case = service.get_case(case_id)
+        assert case["status"] == "PENDING_REVIEW"
+        assert case["submitted_review"]["action"] == "REJECT"
+    finally:
+        runtime.close()
+
+    # Streamlit logs the "default value but also set via the Session State API" warning once
+    # per process instead of rendering it; reset the latch and listen to its logger.
+    monkeypatch.setattr(policies, "_shown_default_value_warning", False)
+    policy_logger = logging.getLogger(policies.__name__)
+    policy_logger.addHandler(caplog.handler)
+    try:
+        at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15)
+        at.query_params["case"] = case_id
+        at.run()
+        at.switch_page(f"{PAGES}/review.py").run()
+    finally:
+        policy_logger.removeHandler(caplog.handler)
+
+    assert not at.exception
+    assert not any("Session State API" in alert.value for alert in [*at.warning, *at.error])
+    assert not any("Session State API" in record.getMessage() for record in caplog.records)
+    assert at.radio(key=f"review_decision_{case_id}").value is DecisionType.REJECT
+    assert at.text_area(key=f"review_note_{case_id}").value == "dup"
+    assert any("A review is already durably submitted" in info.value for info in at.info)
+
+    at.button(key=f"review_submit_{case_id}").click().run()
+    at.button(key="review_confirm_button").click().run()
+
+    outcome = stored_case(database_url, case_id)["state"]["outcome"]
+    assert stored_case(database_url, case_id)["status"] == "COMPLETED"
+    assert (outcome["action"], outcome["source"]) == ("REJECT", "HUMAN_OVERRIDDEN")
+    assert at.toast[0].value == "Reject recorded for INV-LARGE · 0 left in queue"
 
 
 def test_processing_exact_match_completes_autonomously(database_url, at):
