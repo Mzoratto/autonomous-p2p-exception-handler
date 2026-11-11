@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import TypeVar
 
+import openai
 from openai import OpenAI
 from pydantic import BaseModel
 
@@ -16,6 +18,7 @@ from p2p.domain.models import (
     Resolution,
     Severity,
 )
+from p2p.ports import ModelAuthenticationError, ModelUnavailableError
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -29,6 +32,8 @@ def _payload(messages: list[dict[str, str]]) -> dict:
 
 class MockModelProvider:
     """Deterministic provider that exercises the same structured service boundary as live mode."""
+
+    last_call: dict = {"provider": "mock", "model": "mock"}
 
     def structured_response(self, schema: type[T], messages: list[dict[str, str]]) -> T:
         context = _payload(messages)
@@ -172,14 +177,43 @@ class OpenAIModelProvider:
             raise RuntimeError("OPENAI_API_KEY is required when DEMO_MODE is false")
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         base_url = os.getenv("OPENAI_BASE_URL") or None
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+            max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "1")),
+        )
+        self.last_call: dict | None = None
 
     def structured_response(self, schema: type[T], messages: list[dict[str, str]]) -> T:
-        response = self.client.responses.parse(
-            model=self.model,
-            input=messages,
-            text_format=schema,
-        )
+        self.last_call = None  # Never report the previous call for a request that failed.
+        started = time.monotonic()
+        try:
+            response = self.client.responses.parse(
+                model=self.model,
+                input=messages,
+                text_format=schema,
+                store=False,
+            )
+        except openai.AuthenticationError as exc:
+            # A rejected key is a configuration fault; routing cases to review would hide it.
+            raise ModelAuthenticationError(str(exc)) from exc
+        except (
+            openai.APIConnectionError,
+            openai.RateLimitError,
+            openai.InternalServerError,
+        ) as exc:
+            # APIConnectionError includes timeouts.
+            raise ModelUnavailableError(f"{type(exc).__name__}: {exc}") from exc
+        usage = getattr(response, "usage", None)
+        self.last_call = {
+            "provider": "openai",
+            "model": self.model,
+            "response_id": getattr(response, "id", None),
+            "input_tokens": getattr(usage, "input_tokens", None),
+            "output_tokens": getattr(usage, "output_tokens", None),
+            "latency_ms": round((time.monotonic() - started) * 1000),
+        }
         if response.output_parsed is None:
             raise ValueError("model returned no validated structured output")
         return response.output_parsed

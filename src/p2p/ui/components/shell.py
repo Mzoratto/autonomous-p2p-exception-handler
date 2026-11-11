@@ -89,3 +89,28 @@ def show_failure(message: str, exc: Exception) -> None:
     st.error(message)
     with st.expander("Technical details"):
         st.code(f"{type(exc).__name__}: {exc}", language=None)
+
+
+SETUP_ERROR_KEY = "p2p_setup_error"
+
+
+def setup_screen(title: str) -> None:
+    """Replace the app with the two ways out of a live-mode configuration fault."""
+    st.title(title)
+    st.markdown(
+        "The dashboard can't call the model with the current settings. Either:\n\n"
+        "1. Set a valid `OPENAI_API_KEY` in `.env.local` and restart the app, or\n"
+        "2. Set `DEMO_MODE=true` to run on the built-in mock model."
+    )
+    if st.session_state.get(SETUP_ERROR_KEY) == "auth":
+        st.caption("The model service rejected the key while a case was being processed.")
+        if st.button("Try again", type="primary", key="setup_try_again"):
+            st.session_state.pop(SETUP_ERROR_KEY, None)
+            st.rerun()
+    st.stop()
+
+
+def mark_authentication_failure() -> None:
+    """Show the setup screen on the next run; call when a command raises ModelAuthenticationError."""
+    st.session_state[SETUP_ERROR_KEY] = "auth"
+    st.rerun()

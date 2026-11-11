@@ -6,8 +6,10 @@ import streamlit as st
 from pydantic import ValidationError
 
 from p2p.domain.models import Invoice
+from p2p.ports import ModelAuthenticationError
 from p2p.ui.components.chips import h, icon, render_html, status_pill
 from p2p.ui.components.shell import (
+    mark_authentication_failure,
     page_header,
     render_field_errors,
     show_failure,
@@ -139,6 +141,8 @@ def run(invoice: Invoice) -> None:
     try:
         with st.spinner("Running workflow…"):
             result = service().process_invoice(invoice)
+    except ModelAuthenticationError:
+        mark_authentication_failure()
     except ValueError as exc:
         if "different content" in str(exc):
             st.error(

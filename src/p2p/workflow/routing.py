@@ -14,8 +14,21 @@ def route_after_match(state: P2PState) -> str:
     return "investigate"
 
 
+def route_after_investigation(state: P2PState) -> str:
+    """An unreachable model is not asked again; policy sends the case to a reviewer."""
+    return "policy_check" if state.get("model_unavailable") else "resolve"
+
+
+def route_after_resolution(state: P2PState) -> str:
+    return "policy_check" if state.get("model_unavailable") else "critique"
+
+
 def route_after_critique(state: P2PState) -> str:
-    if state["critique"].valid or state.get("reflection_exhausted", False):
+    if (
+        state.get("model_unavailable")
+        or state["critique"].valid
+        or state.get("reflection_exhausted", False)
+    ):
         return "policy_check"
     return "resolve"
 

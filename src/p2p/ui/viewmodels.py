@@ -103,6 +103,8 @@ def display_status(case: dict) -> StatusView:
     status = case.get("status")
     if case.get("last_error") and status != "COMPLETED":
         return StatusView("recovery", "Needs recovery")
+    if case.get("busy"):
+        return StatusView("processing", "Processing")
     if status == "PENDING_REVIEW":
         return StatusView("review", "Awaiting review")
     if status == "COMPLETED":
@@ -250,7 +252,7 @@ def case_header(
         MetaItem("Purchase order", invoice.get("po_number") or "No PO"),
         MetaItem(
             "Exception",
-            label_exception(exception),
+            label_exception(exception) if state.get("match_result") else "Not checked",
             severity_chip(severity) if severity else None,
             f"+{others} more" if others else "",
         ),
@@ -324,6 +326,7 @@ class MatchView:
     lines: list[LineGrid]
     discrepancies: list[DiscrepancyView]
     summary: str
+    ran: bool = True
 
 
 WITHIN, EXCEEDS, CANNOT = "Within tolerance", "Exceeds tolerance", "Cannot compare"
@@ -368,6 +371,9 @@ def match_view(state: dict, rules: BusinessRules) -> MatchView:
     invoice = state["invoice"] if isinstance(state.get("invoice"), dict) else {}
     erp = state.get("erp_context") or {}
     match = state.get("match_result") or {}
+    if not match:
+        # The run stopped before the matcher; nothing has been compared yet.
+        return MatchView(tiles=[], lines=[], discrepancies=[], summary="", ran=False)
     discrepancies = match.get("discrepancies") or []
     types = {item["type"] for item in discrepancies}
     po = erp.get("purchase_order")
@@ -813,10 +819,14 @@ def tab_labels(
         policy_label = (
             f"Policy · {policy.failed} failed" if policy.failed else "Policy · All passed"
         )
+    if not match.ran:
+        match_label = "Three-way match · Not run"
+    elif exceptions:
+        match_label = f"Three-way match · {_plural(exceptions, 'exception')}"
+    else:
+        match_label = "Three-way match · Matched"
     return {
-        "match": f"Three-way match · {_plural(exceptions, 'exception')}"
-        if exceptions
-        else "Three-way match · Matched",
+        "match": match_label,
         "ai": f"AI reasoning · {_plural(len(story.attempts), 'attempt')}"
         if story.invoked
         else "AI reasoning · Not used",

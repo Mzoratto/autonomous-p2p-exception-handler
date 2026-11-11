@@ -203,6 +203,9 @@ def decision_panel(case: dict, app) -> None:
     decision_key, note_key = f"review_decision_{case_id}", f"review_note_{case_id}"
     render_html('<h3 class="p2p-panel-title">Your decision</h3>')
     render_html(recommendation_html(case, app.runtime.rules.confidence.auto_resolve))
+    if case.get("busy"):
+        st.caption("This case is being processed. Refresh in a moment.")
+        return
     submitted = case.get("submitted_review")
     if submitted:
         recovery_panel(case, app, submitted)

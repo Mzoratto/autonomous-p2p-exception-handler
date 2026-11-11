@@ -6,7 +6,10 @@ from urllib.parse import urlsplit
 import streamlit as st
 
 from p2p.application.service import CaseService
+from p2p.domain.models import Invoice
+from p2p.ports import ModelAuthenticationError
 from p2p.ui.components.chips import action_pill, h, icon, render_html, status_pill
+from p2p.ui.components.shell import mark_authentication_failure
 from p2p.ui.identity import current_reviewer
 from p2p.ui.viewmodels import (
     CANNOT,
@@ -21,6 +24,7 @@ from p2p.ui.viewmodels import (
     ai_story,
     case_header,
     default_tab,
+    display_status,
     local_zone,
     match_view,
     policy_view,
@@ -72,6 +76,8 @@ def header_html(view: HeaderView) -> str:
 
 
 def match_html(view: MatchView) -> str:
+    if not view.ran:
+        return '<p class="p2p-caption">The three-way match has not run for this case yet.</p>'
     tiles = "".join(
         f'<div class="p2p-tile p2p-tile-{tile.state}">{icon(TILE_ICONS[tile.state])}'
         f"<span><small>{h(tile.label)}</small>{h(tile.text)}</span></div>"
@@ -268,6 +274,37 @@ def render_timeline(case_id: str, events: list[TimelineEvent]) -> None:
         render_html(event_html(events[selected]))
 
 
+def retry_case(case: dict, app: CaseService) -> None:
+    """Resume a failed run from its last checkpoint; call from the script body."""
+    try:
+        result = app.process_invoice(Invoice.model_validate(case["invoice"]))
+    except ModelAuthenticationError:
+        mark_authentication_failure()
+    except Exception:
+        st.session_state["flash"] = {
+            "kind": "error",
+            "text": "The workflow could not finish. The case is saved; retry it again later.",
+        }
+        st.rerun()
+    status = display_status(app.get_case(result["case_id"]) or {})
+    st.session_state["flash"] = {
+        "kind": "toast",
+        "text": f"{case['invoice_id']} processed again · {status.label}",
+    }
+    st.rerun()
+
+
+def recovery_notice(case: dict, app: CaseService) -> None:
+    if display_status(case).key != "recovery":
+        return
+    st.warning(f"{case['case_id']} needs recovery. Retrying resumes it from its last saved step.")
+    if case.get("last_error"):
+        with st.expander("Technical details"):
+            st.code(case["last_error"], language=None)
+    if st.button("Retry processing", icon=":material/replay:", key=f"retry_{case['case_id']}"):
+        retry_case(case, app)
+
+
 def render_case_detail(case: dict, app: CaseService) -> None:
     if not case:
         st.error("The selected case could not be loaded.")
@@ -285,6 +322,7 @@ def render_case_detail(case: dict, app: CaseService) -> None:
     events = timeline(case, zone, now)
 
     render_html(header_html(header))
+    recovery_notice(case, app)
     with st.popover(":material/link: Copy link"):
         st.code(case_link(case["case_id"]), language=None)
     labels = tab_labels(match, story, policy, len(events))

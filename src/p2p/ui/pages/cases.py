@@ -71,7 +71,10 @@ def table(rows: list[dict]) -> Styler:
                 "Exception": (
                     f"{row['max_severity']} · {label_exception(row['primary_exception'])}"
                     if row["max_severity"]
-                    else label_exception(row["primary_exception"])
+                    # An open case with no exception recorded has not been matched yet.
+                    else label_exception(None)
+                    if row["status"] == "COMPLETED"
+                    else "Not checked"
                 ),
                 "AI confidence": row["ai_confidence"],
                 "Status": display_status(row).label,

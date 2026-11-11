@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    event,
     func,
     inspect,
     literal,
@@ -208,13 +209,26 @@ def to_json(value: Any) -> str:
     return json.dumps(value, default=_json_default, sort_keys=True)
 
 
+def _configure_sqlite(connection: sqlite3.Connection, _record: object) -> None:
+    """WAL lets page reads proceed while a command writes; busy_timeout waits out short locks."""
+    connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    connection.execute("PRAGMA journal_mode=WAL")
+
+
+BUSY_TIMEOUT_MS = 5000
+
+
 class Database:
     def __init__(self, url: str = "sqlite:///data/demo/p2p.db"):
-        if url.startswith("sqlite:///"):
-            db_path = Path(url.removeprefix("sqlite:///"))
-            db_path.parent.mkdir(parents=True, exist_ok=True)
+        path = url.removeprefix("sqlite:///") if url.startswith("sqlite:///") else ""
+        if not path or path == ":memory:":
+            # Commands are serialized with a lock file next to the database, and the
+            # checkpointer opens the same file; both need a real SQLite file.
+            raise ValueError("P2P_DATABASE_URL must be a sqlite:/// file path")
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.url = url
         self.engine = create_engine(url)
+        event.listen(self.engine, "connect", _configure_sqlite)
         self.session_factory = sessionmaker(self.engine, expire_on_commit=False)
 
     def create_all(self) -> None:
@@ -289,18 +303,45 @@ class SqliteRepository:
     def __init__(self, database: Database):
         self.database = database
 
-    @contextmanager
-    def command_lock(self):
-        """Serialize commands across threads/processes sharing this local SQLite file."""
+    def _lock_path(self) -> tuple[threading.RLock, str]:
         path = str(Path(self.database.url.removeprefix("sqlite:///")).resolve())
         with _LOCKS_GUARD:
             lock = _LOCKS.setdefault(path, threading.RLock())
-        with lock, open(path + ".commands.lock", "a") as handle:
+        return lock, path + ".commands.lock"
+
+    @contextmanager
+    def command_lock(self):
+        """Serialize commands across threads/processes sharing this local SQLite file."""
+        lock, lock_file = self._lock_path()
+        with lock, open(lock_file, "a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
                 yield
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
+
+    @contextmanager
+    def try_command_lock(self):
+        """Take the command lock only if it is free; yields whether it was taken."""
+        lock, lock_file = self._lock_path()
+        if not lock.acquire(blocking=False):
+            yield False
+            return
+        try:
+            with open(lock_file, "a") as handle:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    acquired = False
+                else:
+                    acquired = True
+                try:
+                    yield acquired
+                finally:
+                    if acquired:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+        finally:
+            lock.release()
 
     def has_data(self) -> bool:
         with self.database.session_factory() as session:
@@ -327,8 +368,15 @@ class SqliteRepository:
             if command and command.invoice_payload != payload:
                 raise ValueError("Case ID is permanently bound to different invoice content")
             # Include pre-migration cases; never silently combine legacy duplicates.
-            # Only the invoice is read, so an unreadable case state cannot block a new claim.
-            rows = session.execute(select(CaseRow.case_id, CaseRow.invoice_payload)).all()
+            # Only rows that can share this case or invoice identity are read.
+            rows = session.execute(
+                select(CaseRow.case_id, CaseRow.invoice_payload).where(
+                    or_(
+                        CaseRow.case_id == case_id,
+                        func.upper(func.trim(CaseRow.invoice_id)) == invoice.invoice_id,
+                    )
+                )
+            ).all()
             for row_case_id, invoice_payload in rows:
                 existing = Invoice.model_validate_json(invoice_payload)
                 same_identity = (
@@ -390,11 +438,17 @@ class SqliteRepository:
     def reserved_quantities(
         self, po_number: str | None, exclude_case_id: str
     ) -> dict[str, Decimal]:
-        # Reads the invoice and the projected outcome only, never the case state.
+        # Reads only invoices on this PO, plus rows whose PO was never projected (a legacy row
+        # the migration could not read), and never the case state.
+        po_match = (
+            CaseRow.po_number.is_(None) if po_number is None else CaseRow.po_number == po_number
+        )
         with self.database.session_factory() as session:
             rows = session.execute(
                 select(CaseRow.invoice_payload, CaseRow.outcome_action).where(
-                    CaseRow.case_id != exclude_case_id
+                    CaseRow.case_id != exclude_case_id,
+                    or_(po_match, CaseRow.po_number.is_(None)),
+                    or_(CaseRow.outcome_action.is_(None), CaseRow.outcome_action != "REJECT"),
                 )
             ).all()
         quantities: dict[str, Decimal] = {}
@@ -473,8 +527,10 @@ class SqliteRepository:
                 for key, value in facts.items():
                     if getattr(row, key) != value:
                         setattr(row, key, value)
-                # A successful save means reconciliation worked; drop any recorded failure.
-                if row.last_error is not None:
+                # A saved review or outcome means the case is healthy again. A case still
+                # PROCESSING has not moved past its failure, so its error stays until a run
+                # gets it further.
+                if row.last_error is not None and status != "PROCESSING":
                     row.last_error = None
             if status == "PENDING_REVIEW" and row.review_requested_at is None:
                 row.review_requested_at = _utcnow()
@@ -484,9 +540,14 @@ class SqliteRepository:
                     raise ValueError("Completed case requires a validated outcome")
                 if row.completed_at is None:
                     row.completed_at = _naive_utc(snapshot["outcome"]["completed_at"])
-                for event_type, data in [
-                    (AuditEventType.HUMAN_DECISION_RECEIVED, state.get("human_review")),
-                    (AuditEventType.CASE_COMPLETED, outcome),
+                # Each event carries the time the decision was made, not the time of this save.
+                for event_type, data, stamp in [
+                    (
+                        AuditEventType.HUMAN_DECISION_RECEIVED,
+                        state.get("human_review"),
+                        (snapshot.get("human_review") or {}).get("reviewed_at"),
+                    ),
+                    (AuditEventType.CASE_COMPLETED, outcome, snapshot["outcome"]["completed_at"]),
                 ]:
                     if not data:
                         continue
@@ -496,7 +557,7 @@ class SqliteRepository:
                             AuditEventRow(
                                 event_id=event_id,
                                 case_id=case_id,
-                                timestamp=_utcnow(),
+                                timestamp=_naive_utc(stamp) if stamp else _utcnow(),
                                 event_type=event_type.value,
                                 actor="human_reviewer"
                                 if event_type == AuditEventType.HUMAN_DECISION_RECEIVED

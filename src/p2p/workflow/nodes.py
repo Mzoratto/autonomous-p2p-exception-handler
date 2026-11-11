@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
+from typing import Any
 
 from langgraph.types import interrupt
 
@@ -22,8 +24,15 @@ from p2p.domain.models import (
 )
 from p2p.domain.policy import DecisionPolicy
 from p2p.intelligence.services import Critic, Investigator, Resolver
-from p2p.ports import AuditRecorder, ERPRepository
+from p2p.ports import AuditRecorder, ERPRepository, ModelAuthenticationError, ModelUnavailableError
 from p2p.workflow.state import P2PState
+
+logger = logging.getLogger("p2p.workflow")
+
+
+def _model_call(service: Any) -> dict | None:
+    """The provider's record of its last call (model, tokens, latency), if it keeps one."""
+    return getattr(service.provider, "last_call", None)
 
 
 @dataclass(frozen=True)
@@ -81,7 +90,12 @@ def ingest_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         "domain",
         {"invoice_id": state["invoice"].invoice_id, "total": str(state["invoice"].total)},
     )
-    return {"reflection_count": 0, "reflection_exhausted": False, "model_error": None}
+    return {
+        "reflection_count": 0,
+        "reflection_exhausted": False,
+        "model_error": None,
+        "model_unavailable": False,
+    }
 
 
 def load_context_node(state: P2PState, deps: WorkflowDependencies) -> dict:
@@ -148,7 +162,11 @@ def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             ):
                 raise ValueError("Investigation cites unsupported or altered evidence")
         error = None
+        unavailable = False
+    except ModelAuthenticationError:
+        raise  # A configuration fault: stop the run and leave the case for recovery.
     except Exception as exc:
+        logger.exception("Investigator failed for %s", state["case_id"])
         result = InvestigationResult(
             root_cause="Model output could not be validated",
             evidence=[],
@@ -157,14 +175,19 @@ def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             confidence=0,
         )
         error = f"{type(exc).__name__}: structured investigation failed"
+        unavailable = isinstance(exc, ModelUnavailableError)
     _record(
         deps,
         state,
         AuditEventType.INVESTIGATION_COMPLETED,
         "ai_investigator",
-        {**result.model_dump(mode="json"), "error": error},
+        {
+            **result.model_dump(mode="json"),
+            "error": error,
+            "model_call": _model_call(deps.investigator),
+        },
     )
-    return {"investigation": result, "model_error": error}
+    return {"investigation": result, "model_error": error, "model_unavailable": unavailable}
 
 
 def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
@@ -187,13 +210,18 @@ def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         ):
             raise ValueError("Resolution must cite supplied deterministic evidence")
         error = state.get("model_error")
+        unavailable = False
+    except ModelAuthenticationError:
+        raise
     except Exception as exc:
+        logger.exception("Resolver failed for %s", state["case_id"])
         result = Resolution(
             action=DecisionType.ESCALATE,
             rationale="Structured resolution generation failed; deterministic fallback escalates.",
             confidence=0,
         )
         error = f"{type(exc).__name__}: structured resolution failed"
+        unavailable = isinstance(exc, ModelUnavailableError)
     event_type = (
         AuditEventType.RESOLUTION_REVISED
         if state.get("reflection_count", 0) > 0
@@ -204,9 +232,13 @@ def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         state,
         event_type,
         "ai_resolution_agent",
-        {**result.model_dump(mode="json"), "error": error},
+        {
+            **result.model_dump(mode="json"),
+            "error": error,
+            "model_call": _model_call(deps.resolver),
+        },
     )
-    return {"resolution": result, "model_error": error}
+    return {"resolution": result, "model_error": error, "model_unavailable": unavailable}
 
 
 def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
@@ -220,7 +252,11 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         )
         critique = CritiqueResult.model_validate(critique)
         error = state.get("model_error")
+        unavailable = False
+    except ModelAuthenticationError:
+        raise
     except Exception as exc:
+        logger.exception("Critic failed for %s", state["case_id"])
         critique = CritiqueResult(
             valid=False,
             issues=["Critic output could not be validated."],
@@ -228,6 +264,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             confidence_adjustment=-1,
         )
         error = f"{type(exc).__name__}: structured critique failed"
+        unavailable = isinstance(exc, ModelUnavailableError)
 
     count = state.get("reflection_count", 0) + (0 if critique.valid else 1)
     exhausted = not critique.valid and count >= deps.rules.reflection.max_iterations
@@ -243,6 +280,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             "iteration": count,
             "exhausted": exhausted,
             "adjusted_confidence": adjusted,
+            "model_call": _model_call(deps.critic),
         },
     )
     return {
@@ -251,6 +289,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         "reflection_count": count,
         "reflection_exhausted": exhausted,
         "model_error": error,
+        "model_unavailable": unavailable,
     }
 
 
