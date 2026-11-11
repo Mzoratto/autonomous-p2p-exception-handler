@@ -62,7 +62,24 @@ def test_review_query_param_selects_a_pending_case(database_url):
     case_ids = process(database_url, "03_large_price_variance", "06_missing_po")
 
     for case_id in case_ids:
-        assert open_page("review", case=case_id).selectbox(key="review_case").value == case_id
+        at = open_page("review", case=case_id)
+        assert [radio.key for radio in at.radio if radio.key.startswith("review_decision_")] == [
+            f"review_decision_{case_id}"
+        ]
+        assert at.query_params["case"] == case_id
+
+
+def test_review_queue_orders_by_severity_then_value(database_url):
+    nopo, large, high = process(
+        database_url, "06_missing_po", "03_large_price_variance", "10_ambiguous_high_value"
+    )
+
+    at = open_page("review")
+
+    opened = [button.key for button in at.button if button.key.startswith("queue_open_")]
+    # 03 and 06 are MATERIAL (03 is worth more), 10 is a WARNING value review.
+    assert opened == [f"queue_open_{large}", f"queue_open_{nopo}", f"queue_open_{high}"]
+    assert at.query_params["case"] == large
 
 
 def tab_labels(at: AppTest) -> list[str]:
@@ -76,8 +93,9 @@ def test_case_tabs_survive_a_label_change_after_review(database_url):
     assert "Audit timeline · 12" in tab_labels(at)
 
     at.switch_page("src/p2p/ui/pages/review.py").run()
-    at.radio(key="review_action").set_value(DecisionType.REQUEST_INFO).run()
-    at.button(key="review_submit").click().run()
+    at.radio(key=f"review_decision_{case_id}").set_value(DecisionType.REQUEST_INFO).run()
+    at.button(key=f"review_submit_{case_id}").click().run()
+    at.button(key="review_confirm_button").click().run()
     at.query_params["case"] = case_id
     at.switch_page("src/p2p/ui/pages/cases.py").run()
 

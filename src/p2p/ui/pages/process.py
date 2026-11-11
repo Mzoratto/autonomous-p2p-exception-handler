@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
+from datetime import UTC, datetime
 
 import streamlit as st
 from pydantic import ValidationError
 
 from p2p.domain.models import Invoice
-from p2p.ui.components.case_detail import render_case_detail
-from p2p.ui.components.chips import h, render_html
+from p2p.ui.components.chips import h, icon, render_html, status_pill
 from p2p.ui.components.shell import (
     page_header,
     render_field_errors,
@@ -16,211 +15,230 @@ from p2p.ui.components.shell import (
     top_bar,
 )
 from p2p.ui.runtime import service
-from p2p.ui.viewmodels import format_money, validation_rows
+from p2p.ui.scenarios import AI_REVIEW, SCENARIOS, VALUE_REVIEW
+from p2p.ui.viewmodels import (
+    display_status,
+    format_money,
+    local_zone,
+    timeline,
+    validation_rows,
+)
 
-STAGES = ["Input", "Analyze", "Resolve"]
+STEPS = ["Choose invoice", "Validate", "Run workflow"]
+STATE_KEYS = (
+    "process_step",
+    "process_label",
+    "process_invoice",
+    "process_errors",
+    "process_case_id",
+    "process_is_replay",
+)
+TAG_CLASSES = {AI_REVIEW: "ai", VALUE_REVIEW: "value"}
 
 
-def queue_invoice_workflow_stage(stage_name: str) -> None:
-    st.session_state["invoice_workflow_pending_stage"] = stage_name
+def go_to(step: int) -> None:
+    st.session_state["process_step"] = step
 
 
-def reset_invoice_workflow() -> None:
-    for key in (
-        "invoice_workflow_invoice",
-        "invoice_workflow_case_id",
-        "invoice_workflow_status",
-    ):
+def reset() -> None:
+    for key in STATE_KEYS:
         st.session_state.pop(key, None)
-    queue_invoice_workflow_stage("Input")
 
 
-def render_validated_invoice(invoice: Invoice) -> None:
-    render_html(
-        f"""
-        <div class="p2p-case-summary-grid">
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice</div><div class="p2p-summary-value">{h(invoice.invoice_id)}</div></div>
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Supplier</div><div class="p2p-summary-value" title="{h(invoice.supplier_name)}">{h(invoice.supplier_name)}</div></div>
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Purchase order</div><div class="p2p-summary-value">{h(invoice.po_number or "Missing")}</div></div>
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice total</div><div class="p2p-summary-value">{h(format_money(invoice.total, invoice.currency))}</div></div>
-        </div>
-        """,
+def choose(label: str, invoice: Invoice | None, errors: list[tuple[str, str]] | None) -> None:
+    st.session_state.update(
+        process_label=label,
+        process_invoice=invoice,
+        process_errors=errors or [],
+        process_step=1,
     )
+    st.session_state.pop("process_case_id", None)
+    st.session_state.pop("process_is_replay", None)
 
 
-def sync_stage() -> None:
-    st.session_state["process_stage"] = st.session_state["invoice_workflow_stage"]
+def parse(payload: str | bytes) -> tuple[Invoice | None, list[tuple[str, str]]]:
+    try:
+        return service().parse_invoice(payload), []
+    except ValidationError as exc:
+        return None, validation_rows(exc)
+    except UnicodeDecodeError:
+        return None, [("file", "The file is not valid UTF-8 text.")]
+
+
+def stepper(current: int) -> None:
+    with st.container(horizontal=True, wrap=True, key="process-stepper"):
+        for index, label in enumerate(STEPS):
+            done = index < current
+            st.button(
+                label,
+                key=f"process_step_{index}",
+                icon=":material/check_circle:" if done else None,
+                type="primary" if index == current else "secondary",
+                disabled=index > current,
+                on_click=go_to if done else None,
+                args=(index,) if done else None,
+            )
+
+
+def scenario_step() -> None:
+    invoices = service().demo_invoices()
+    render_html('<h2 class="p2p-section-title">Demo scenarios</h2>')
+    with st.container(horizontal=True, wrap=True, key="process-scenarios"):
+        for scenario in SCENARIOS:
+            invoice = invoices[scenario.invoice_key]
+            tag = TAG_CLASSES.get(scenario.tag, "deterministic")
+            with st.container(border=True, width=240, key=f"scenario-{scenario.key}"):
+                render_html(
+                    f"""
+                    <div class="p2p-scenario">
+                      <div class="p2p-scenario-top"><code>{h(scenario.key)}</code><span class="p2p-tag p2p-tag-{tag}">{h(scenario.tag)}</span></div>
+                      <strong>{h(scenario.name)}</strong>
+                      <span class="p2p-muted">{h(scenario.expected)}</span>
+                      <code>{h(invoice.invoice_id)} · {h(format_money(invoice.total, invoice.currency))}</code>
+                    </div>
+                    """
+                )
+                if st.button("Select", key=f"scenario_select_{scenario.key}", width="stretch"):
+                    choose(f"{scenario.key} · {scenario.name}", invoice, None)
+                    st.rerun()
+
+    with st.expander("Upload or paste JSON"):
+        upload = st.file_uploader("Invoice JSON", type=["json"], key="process_upload")
+        pasted = st.text_area("Or paste invoice JSON", height=200, key="process_paste")
+        if st.button("Validate invoice", key="process_validate"):
+            if upload is not None:
+                invoice, errors = parse(upload.getvalue())
+                choose(f"Uploaded file · {upload.name}", invoice, errors)
+                st.rerun()
+            elif pasted.strip():
+                invoice, errors = parse(pasted)
+                choose("Pasted JSON", invoice, errors)
+                st.rerun()
+            else:
+                st.error("Upload a file or paste invoice JSON first.")
+
+
+def checklist(invoice: Invoice) -> list[tuple[str, str]]:
+    rows = [
+        ("schema", "All required fields present; types valid"),
+        ("invoice_id", f"{invoice.invoice_id} (normalised to upper case)"),
+    ]
+    rows += [
+        (f"line_items[{index}]", f"{line.quantity} × {line.unit_price} = {line.line_total}")
+        for index, line in enumerate(invoice.line_items)
+    ]
+    rows += [
+        ("subtotal", f"Sum of line totals = {invoice.subtotal}"),
+        ("total", f"Subtotal + tax ({invoice.tax}) = {invoice.total}"),
+        ("currency", invoice.currency),
+    ]
+    return rows
+
+
+def run(invoice: Invoice) -> None:
+    try:
+        with st.spinner("Running workflow…"):
+            result = service().process_invoice(invoice)
+    except ValueError as exc:
+        if "different content" in str(exc):
+            st.error(
+                "An invoice with this number already exists for this supplier with different content."
+            )
+        else:
+            show_failure(
+                "The workflow could not finish. The case is saved; run the same invoice again to resume.",
+                exc,
+            )
+        return
+    except Exception as exc:
+        show_failure(
+            "The workflow could not finish. The case is saved; run the same invoice again to resume.",
+            exc,
+        )
+        return
+    st.session_state.update(
+        process_case_id=result["case_id"],
+        process_is_replay=result["is_replay"],
+        process_step=2,
+    )
+    st.rerun()
+
+
+def validate_step() -> None:
+    invoice: Invoice | None = st.session_state.get("process_invoice")
+    errors = st.session_state.get("process_errors") or []
+    label = st.session_state.get("process_label", "")
+    title = f"Validate {invoice.invoice_id}" if invoice else "Validate invoice"
+    with st.container(border=True, key="process-validate-card"):
+        render_html(f'<div class="p2p-step-head"><span>{h(label)}</span><h2>{h(title)}</h2></div>')
+        if errors or invoice is None:
+            render_field_errors(errors)
+            st.button("Back", key="process_back", on_click=go_to, args=(0,))
+            return
+        rows = "".join(
+            f'<div class="p2p-validation-row">{icon("check_circle")}<code>{h(field)}</code><span>{h(text)}</span></div>'
+            for field, text in checklist(invoice)
+        )
+        render_html(f'<div class="p2p-validation">{rows}</div>')
+        with st.container(horizontal=True, horizontal_alignment="right"):
+            st.button("Back", key="process_back", on_click=go_to, args=(0,))
+            if st.button("Run workflow", type="primary", key="process_run"):
+                run(invoice)
+
+
+def result_step() -> None:
+    app = service()
+    case_id = st.session_state.get("process_case_id")
+    case = app.get_case(case_id) if case_id else None
+    if not case:
+        st.error("The processed case could not be loaded.")
+        st.button("Process another", key="process_another", on_click=reset)
+        return
+    status = display_status(case)
+    label = st.session_state.get("process_label", "")
+    with st.container(border=True, key="process-result-card"):
+        render_html(
+            f"""
+            <div class="p2p-step-head p2p-step-head-row">
+              <div><span>{h(label)}</span><h2>{h(case["invoice_id"])} → {h(status.label)}</h2></div>
+              {status_pill(status.key, status.label)}
+            </div>
+            """
+        )
+        if st.session_state.get("process_is_replay"):
+            st.info(
+                "This invoice was already processed. Identical invoices return their original "
+                f"case, {case_id}."
+            )
+        if status.key == "recovery":
+            st.warning(f"{case_id} needs recovery. Run the same invoice again to resume.")
+        events = timeline(case, local_zone(st.context.timezone), datetime.now(UTC))
+        rows = "".join(
+            f'<div class="p2p-run-event"><i style="background:{event.dot}"></i><span>{h(event.label)}</span><code>{h(event.delta)}</code></div>'
+            for event in events
+        )
+        render_html(f'<div class="p2p-run-events">{rows}</div>')
+        with st.container(horizontal=True, horizontal_alignment="right"):
+            st.button("Process another", key="process_another", on_click=reset)
+            if st.button("Open case", type="primary", key="process_open_case"):
+                switch_to("review" if case["status"] == "PENDING_REVIEW" else "cases", case=case_id)
 
 
 def render() -> None:
-    app = service()
-    pending_stage = st.session_state.pop("invoice_workflow_pending_stage", None)
-    if pending_stage:
-        st.session_state["process_stage"] = pending_stage
-    # The stage widget's own state is dropped while another page is open; this mirror is not.
-    st.session_state["invoice_workflow_stage"] = st.session_state.get("process_stage", "Input")
-
+    step = st.session_state.get("process_step", 0)
     top_bar(["Process invoice"], "/process")
     page_header(
         "New workflow",
         "Process an invoice",
-        "Validate the input, run the controlled analysis, and inspect the resulting decision.",
+        "Pick a scenario, validate it, then run the controlled workflow.",
     )
-    with st.container(key="invoice-workflow-stepper"):
-        workflow_stage = st.radio(
-            "Workflow stage",
-            STAGES,
-            key="invoice_workflow_stage",
-            on_change=sync_stage,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-
-    if workflow_stage == "Input":
-        with st.container(border=True):
-            render_html('<div class="p2p-section-title">1 · Select invoice input</div>')
-            source = st.radio(
-                "Input source",
-                ["Demo scenario", "Upload JSON", "Paste JSON"],
-                horizontal=True,
-            )
-            payload: str | bytes | None = None
-            if source == "Demo scenario":
-                files = sorted(Path("data/demo/invoices").glob("*.json"))
-                if not files:
-                    st.warning("Run `make seed` to generate demo invoices.")
-                    return
-                chosen = st.selectbox(
-                    "Scenario",
-                    files,
-                    format_func=lambda item: item.stem.replace("_", " ").title(),
-                    key="process_scenario",
-                )
-                payload = chosen.read_text(encoding="utf-8")
-                with st.expander("Preview invoice JSON"):
-                    st.code(payload, language="json")
-            elif source == "Upload JSON":
-                upload = st.file_uploader("Invoice JSON", type=["json"])
-                payload = upload.getvalue() if upload else None
-            else:
-                payload = st.text_area("Invoice JSON", height=320)
-
-            if st.button(
-                "Validate and continue",
-                type="primary",
-                disabled=not payload,
-                width="stretch",
-                key="process_validate",
-            ):
-                try:
-                    st.session_state["invoice_workflow_invoice"] = app.parse_invoice(payload or "")
-                    st.session_state.pop("invoice_workflow_case_id", None)
-                    st.session_state.pop("invoice_workflow_status", None)
-                    queue_invoice_workflow_stage("Analyze")
-                    st.rerun()
-                except ValidationError as exc:
-                    render_field_errors(validation_rows(exc))
-                except UnicodeDecodeError:
-                    render_field_errors([("file", "The file is not valid UTF-8 text.")])
-        return
-
-    invoice = st.session_state.get("invoice_workflow_invoice")
-    if invoice is None:
-        st.info("Validate an invoice in the Input stage before continuing.")
-        st.button(
-            "Go to input",
-            type="primary",
-            on_click=queue_invoice_workflow_stage,
-            args=("Input",),
-        )
-        return
-
-    if workflow_stage == "Analyze":
-        with st.container(border=True):
-            render_html('<div class="p2p-section-title">2 · Analyze the exception</div>')
-            st.success("Invoice structure and arithmetic are valid.")
-            render_validated_invoice(invoice)
-            st.caption(
-                "The workflow will retrieve ERP evidence, run deterministic three-way matching, "
-                "invoke bounded AI reasoning only for material exceptions, and apply policy controls."
-            )
-            back, run = st.columns([1, 2])
-            with back:
-                st.button(
-                    "Back to input",
-                    width="stretch",
-                    on_click=queue_invoice_workflow_stage,
-                    args=("Input",),
-                )
-            with run:
-                if st.button("Run analysis", type="primary", width="stretch", key="process_run"):
-                    try:
-                        with st.status("Analyzing invoice exception…", expanded=True) as status:
-                            st.write("Retrieving purchase order, receipt, and supplier evidence")
-                            st.write("Running deterministic three-way matching")
-                            st.write("Applying bounded reasoning and decision policy when required")
-                            result = app.process_invoice(invoice)
-                            status.update(
-                                label="Analysis complete — human review required"
-                                if result["status"] == "PENDING_REVIEW"
-                                else "Analysis and resolution complete",
-                                state="complete",
-                            )
-                        st.session_state["invoice_workflow_case_id"] = result["case_id"]
-                        st.session_state["invoice_workflow_status"] = result["status"]
-                        queue_invoice_workflow_stage("Resolve")
-                        st.rerun()
-                    except Exception as exc:
-                        show_failure(
-                            "The workflow could not finish. The case is saved; "
-                            "run the same invoice again to resume.",
-                            exc,
-                        )
-        return
-
-    case_id = st.session_state.get("invoice_workflow_case_id")
-    if not case_id:
-        st.info("Run the Analyze stage before opening the resolution.")
-        st.button(
-            "Go to analysis",
-            type="primary",
-            on_click=queue_invoice_workflow_stage,
-            args=("Analyze",),
-        )
-        return
-
-    case = app.get_case(case_id) or {}
-    if case.get("status") == "PENDING_REVIEW":
-        st.warning(f"{case_id} is persisted and waiting for a reviewer.")
+    stepper(step)
+    if step == 0:
+        scenario_step()
+    elif step == 1:
+        validate_step()
     else:
-        source = case.get("state", {}).get("outcome", {}).get("source")
-        if case.get("status") == "COMPLETED":
-            st.success(
-                f"{case_id} completed autonomously."
-                if source == "AUTONOMOUS"
-                else f"{case_id} completed after human review."
-            )
-        else:
-            st.warning(
-                f"{case_id} requires recovery. Resubmit the same invoice to resume processing."
-            )
-    actions = st.columns(2)
-    with actions[0]:
-        st.button(
-            "Process another invoice",
-            width="stretch",
-            on_click=reset_invoice_workflow,
-        )
-    with actions[1]:
-        pending = case.get("status") == "PENDING_REVIEW"
-        if st.button(
-            "Open review queue" if pending else "Open cases",
-            type="primary",
-            width="stretch",
-            key="process_open_case",
-        ):
-            switch_to("review" if pending else "cases", case=case_id)
-    render_case_detail(case, app)
+        result_step()
 
 
 render()

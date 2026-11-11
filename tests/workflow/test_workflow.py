@@ -26,6 +26,38 @@ def test_exact_match_auto_approves_without_ai(app):
     assert "investigation" not in state
 
 
+def test_identical_resubmission_is_reported_as_replay(app):
+    invoice = demo_invoices()["01_exact_match"]
+
+    first = app.process_invoice(invoice)
+    second = app.process_invoice(invoice)
+
+    assert first["is_replay"] is False
+    assert second["is_replay"] is True
+    assert second["case_id"] == first["case_id"]
+
+
+def test_recovering_an_unsaved_completion_is_not_a_replay(app, monkeypatch):
+    repo = app.runtime.repository
+    save = repo.save_case
+
+    def fail_completed(case_id, invoice, status, state):
+        if status == "COMPLETED":
+            raise OSError("injected save failure")
+        return save(case_id, invoice, status, state)
+
+    monkeypatch.setattr(repo, "save_case", fail_completed)
+    invoice = demo_invoices()["01_exact_match"]
+    with pytest.raises(OSError):
+        app.process_invoice(invoice)
+    monkeypatch.setattr(repo, "save_case", save)
+
+    recovered = app.process_invoice(invoice)
+
+    assert recovered["status"] == "COMPLETED"
+    assert recovered["is_replay"] is False
+
+
 def test_reflexion_is_a_real_graph_loop_then_policy_interrupts(app):
     result = app.process_invoice(demo_invoices()["03_large_price_variance"])
     state = result["state"]
