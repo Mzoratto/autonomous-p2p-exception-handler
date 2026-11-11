@@ -101,7 +101,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
-    { name = "streamlit", specifier = ">=1.40,<2" },
+    { name = "streamlit", specifier = ">=1.67,<2" },
 ]
 provides-extras = ["dev"]
 
