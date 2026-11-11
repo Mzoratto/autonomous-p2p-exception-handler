@@ -25,6 +25,7 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from p2p.domain.casefacts import project
@@ -235,6 +236,11 @@ class Database:
                 try:
                     self._backfill(session, session.get(CaseRow, case_id))
                     session.commit()
+                except OperationalError:
+                    # Locked or busy database: nothing is wrong with the row, so leave it
+                    # unmarked and let the next start retry it.
+                    session.rollback()
+                    raise
                 except Exception as exc:
                     session.rollback()
                     row = session.get(CaseRow, case_id)

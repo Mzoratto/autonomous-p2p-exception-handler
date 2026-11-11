@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy.exc import OperationalError
 from streamlit.testing.v1 import AppTest
 
 from p2p.application.service import CaseService, create_runtime
@@ -170,6 +171,36 @@ def test_migration_keeps_unreadable_rows_and_the_app_starts(tmp_path, monkeypatc
         broken: "Needs recovery",
         non_scalar: "Needs recovery",
     }
+
+
+def test_migration_leaves_a_row_unmarked_when_the_database_is_busy(tmp_path, monkeypatch):
+    source = tmp_path / "source.db"
+    runtime = create_runtime(
+        database_url=f"sqlite:///{source}", demo_mode=True, checkpointer=InMemorySaver()
+    )
+    case_id = CaseService(runtime).process_invoice(demo_invoices()["01_exact_match"])["case_id"]
+    runtime.close()
+    legacy = tmp_path / "legacy.db"
+    legacy_copy(source, legacy, [case_id])
+
+    def locked(session, row):
+        raise OperationalError("UPDATE cases", {}, sqlite3.OperationalError("database is locked"))
+
+    monkeypatch.setattr(Database, "_backfill", staticmethod(locked))
+    with pytest.raises(OperationalError):
+        Database(f"sqlite:///{legacy}").create_all()
+    monkeypatch.undo()
+
+    with sqlite3.connect(legacy) as connection:
+        assert connection.execute("SELECT created_at, last_error FROM cases").fetchone() == (
+            None,
+            None,
+        )
+    database = Database(f"sqlite:///{legacy}")
+    database.create_all()
+    with database.session_factory() as session:
+        row = session.get(CaseRow, case_id)
+        assert (row.supplier_name, row.last_error) == ("Acme Components", None)
 
 
 @pytest.fixture
