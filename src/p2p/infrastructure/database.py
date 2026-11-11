@@ -212,7 +212,9 @@ class Database:
         """Add the projected case columns to older databases and backfill them once.
 
         Idempotent: columns and indexes are only added when missing, and only rows without
-        `created_at` are backfilled.
+        `created_at` are backfilled. A row whose stored payloads cannot be read keeps empty
+        projected columns and gets `last_error`; its `created_at` is still set, so it is not
+        retried on every start.
         """
         existing = {column["name"] for column in inspect(self.engine).get_columns("cases")}
         with self.engine.begin() as connection:
@@ -227,8 +229,16 @@ class Database:
         with self.session_factory() as session:
             rows = session.scalars(select(CaseRow).where(CaseRow.created_at.is_(None))).all()
             for row in rows:
-                state = json.loads(row.state_payload)
-                for key, value in project(json.loads(row.invoice_payload), state).items():
+                try:
+                    state = json.loads(row.state_payload)
+                    facts = project(json.loads(row.invoice_payload), state)
+                    completed = (state.get("outcome") or {}).get("completed_at")
+                    completed_at = _naive_utc(completed) if completed else None
+                except Exception as exc:
+                    row.created_at = row.updated_at
+                    row.last_error = f"Migration could not read stored state: {type(exc).__name__}"
+                    continue
+                for key, value in facts.items():
                     setattr(row, key, value)
                 first_event = session.scalar(
                     select(func.min(AuditEventRow.timestamp)).where(
@@ -242,8 +252,7 @@ class Database:
                         AuditEventRow.event_type == AuditEventType.HUMAN_REVIEW_REQUESTED.value,
                     )
                 )
-                completed = (state.get("outcome") or {}).get("completed_at")
-                row.completed_at = _naive_utc(completed) if completed else None
+                row.completed_at = completed_at
             session.commit()
 
 

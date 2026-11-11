@@ -233,6 +233,8 @@
 .p2p-panel-title { margin: 0; padding: 0; font-size: 16px; font-weight: 600; color: var(--ink); }
 .p2p-recommendation { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--surface-subtle); }
 .p2p-recommendation-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.p2p-recovery-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--status-review-dot); border-radius: 10px; background: var(--surface); }
+.p2p-recovery-card .p2p-status-pill { align-self: flex-start; }
 .p2p-meter { position: relative; height: 6px; border-radius: var(--radius-chip); background: var(--line); }
 .p2p-meter-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--radius-chip); background: var(--blue); }
 .p2p-meter-gate { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
