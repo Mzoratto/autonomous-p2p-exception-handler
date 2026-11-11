@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from p2p.ui.components.case_detail import render_case
+from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import icon, render_html
 from p2p.ui.components.shell import page_header, top_bar
 from p2p.ui.runtime import service
@@ -58,7 +58,7 @@ def render() -> None:
         key="cases_case",
         on_change=remember_case,
     )
-    render_case(app.get_case(selected_id) or cases[selected_id])
+    render_case_detail(app.get_case(selected_id) or cases[selected_id], app)
 
 
 render()

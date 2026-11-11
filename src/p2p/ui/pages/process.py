@@ -6,7 +6,7 @@ import streamlit as st
 from pydantic import ValidationError
 
 from p2p.domain.models import Invoice
-from p2p.ui.components.case_detail import render_case
+from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import h, render_html
 from p2p.ui.components.shell import (
     page_header,
@@ -220,7 +220,7 @@ def render() -> None:
             key="process_open_case",
         ):
             switch_to("review" if pending else "cases", case=case_id)
-    render_case(case)
+    render_case_detail(case, app)
 
 
 render()

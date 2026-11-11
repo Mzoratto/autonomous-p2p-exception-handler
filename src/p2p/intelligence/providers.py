@@ -52,14 +52,7 @@ class MockModelProvider:
             )
             for item in discrepancies
         ]
-        if DiscrepancyType.DUPLICATE_INVOICE in types:
-            root, action, confidence, missing = (
-                "Previously recorded invoice identifier",
-                DecisionType.REJECT,
-                0.99,
-                [],
-            )
-        elif DiscrepancyType.MISSING_PO in types:
+        if DiscrepancyType.MISSING_PO in types:
             root, action, confidence, missing = (
                 "No PO reference is available in ERP context",
                 DecisionType.ESCALATE,

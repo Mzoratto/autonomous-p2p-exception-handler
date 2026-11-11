@@ -1,220 +1,323 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from urllib.parse import urlsplit
+
 import streamlit as st
 
+from p2p.application.service import CaseService
 from p2p.ui.components.chips import action_pill, h, icon, render_html, status_pill
+from p2p.ui.identity import current_reviewer
 from p2p.ui.viewmodels import (
-    display_status,
-    format_money,
-    label_action,
-    label_event,
-    label_exception,
+    CANNOT,
+    EXCEEDS,
+    WITHIN,
+    AiStoryView,
+    Attempt,
+    HeaderView,
+    MatchView,
+    PolicyView,
+    TimelineEvent,
+    ai_story,
+    case_header,
+    default_tab,
+    local_zone,
+    match_view,
+    outcome_view,
+    policy_view,
+    tab_labels,
+    timeline,
 )
 
-
-def render_discrepancies(state: dict) -> None:
-    result = state.get("match_result") or {}
-    summary = result.get("summary", "Not yet available")
-    render_html(f'<div class="p2p-section-subtitle">{h(summary)}</div>')
-    discrepancies = result.get("discrepancies", [])
-    if not discrepancies:
-        st.success("No discrepancies — exact three-way match")
-        return
-    for item in discrepancies:
-        severity = str(item.get("severity", "info")).lower()
-        render_html(
-            f"""
-            <div class="p2p-discrepancy">
-              <div class="p2p-discrepancy-head">
-                <div class="p2p-discrepancy-type">{h(label_exception(item.get("type")))}</div>
-                <span class="p2p-severity-chip p2p-severity-{h(severity)}">{h(severity)}</span>
-              </div>
-              <div class="p2p-discrepancy-copy">{h(item.get("explanation", "No explanation provided."))}</div>
-            </div>
-            """,
-        )
+TILE_ICONS = {"ok": "check_circle", "fail": "cancel", "na": "remove"}
+RESULTS = {
+    EXCEEDS: ("exceeds", "error"),
+    CANNOT: ("cannot", "help"),
+    WITHIN: ("within", "check_circle"),
+}
+CHECK_ICONS = {True: "check_circle", False: "cancel", None: "remove"}
 
 
-def stage(title: str, detail: str, warning: bool = False) -> str:
-    warning_class = " p2p-warn" if warning else ""
-    marker = icon("priority_high" if warning else "check")
+def case_link(case_id: str) -> str:
+    path = f"/cases?case={case_id}"
+    url = st.context.url
+    if not url:
+        return path
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}{path}"
+
+
+def _chip(key: str, text: str) -> str:
+    return f'<span class="p2p-severity-chip p2p-severity-{h(key)}">{h(text)}</span>'
+
+
+def header_html(view: HeaderView) -> str:
+    meta = "".join(
+        f'<div class="p2p-meta"><span>{h(item.label)}</span><strong>{h(item.value)}'
+        f"{_chip(item.chip.key, item.chip.text) if item.chip else ''}"
+        f"{f'<em>{h(item.extra)}</em>' if item.extra else ''}</strong></div>"
+        for item in view.meta
+    )
     return f"""
-      <div class="p2p-stage">
-        <span class="p2p-stage-dot{warning_class}">{marker}</span>
-        <div class="p2p-stage-title">{h(title)}</div>
-        <div class="p2p-stage-detail">{h(detail)}</div>
+    <section class="p2p-case-header">
+      <div class="p2p-case-header-top">
+        <div class="p2p-case-heading">
+          <span class="p2p-case-id">{h(view.case_id)}</span>
+          <h2>{h(view.title)}</h2>
+        </div>
+        {status_pill(view.status.key, view.status.label)}
       </div>
+      <div class="p2p-meta-grid">{meta}</div>
+    </section>
     """
 
 
-def render_case(case: dict) -> None:
+def outcome_html(rows: list[tuple[str, str]]) -> str:
+    items = "".join(
+        f'<div class="p2p-meta"><span>{h(key)}</span><strong>{h(value)}</strong></div>'
+        for key, value in rows
+    )
+    return f'<section class="p2p-outcome-card"><div class="p2p-meta-grid">{items}</div></section>'
+
+
+def match_html(view: MatchView) -> str:
+    tiles = "".join(
+        f'<div class="p2p-tile p2p-tile-{tile.state}">{icon(TILE_ICONS[tile.state])}'
+        f"<span><small>{h(tile.label)}</small>{h(tile.text)}</span></div>"
+        for tile in view.tiles
+    )
+    grids = []
+    for line in view.lines:
+        rows = "".join(
+            f"""
+            <tr>
+              <th scope="row">{h(row.field)}</th>
+              <td class="p2p-num p2p-invoice-cell">{h(row.invoice)}</td>
+              <td class="p2p-num">{h(row.po)}</td>
+              <td class="p2p-num">{h(row.receipt)}</td>
+              <td>{h(row.variance)}</td>
+              <td><span class="p2p-result p2p-result-{RESULTS[row.result][0]}">{icon(RESULTS[row.result][1])}{h(row.result)}</span><small>{h(row.tolerance)}</small></td>
+            </tr>
+            """
+            for row in line.rows
+        )
+        note = f'<p class="p2p-caption">{h(line.note)}</p>' if line.note else ""
+        grids.append(
+            f"""
+            <h3 class="p2p-subhead">{h(line.title)}</h3>
+            <div class="p2p-table-wrap">
+              <table class="p2p-match-grid">
+                <thead><tr><th></th><th class="p2p-num">Invoice</th><th class="p2p-num">PO</th><th class="p2p-num">Receipt</th><th>Variance</th><th>Tolerance</th></tr></thead>
+                <tbody>{rows}</tbody>
+              </table>
+            </div>
+            {note}
+            """
+        )
+    discrepancies = "".join(
+        f"""
+        <div class="p2p-finding p2p-finding-{h(item.severity.key)}">
+          {_chip(item.severity.key, item.severity.text)}
+          <div><strong>{h(item.label)}</strong><span>{h(item.explanation)}</span><code>{h(item.reference)}</code></div>
+        </div>
+        """
+        for item in view.discrepancies
+    )
+    return f"""
+    <div class="p2p-tab-body">
+      <div class="p2p-tiles">{tiles}</div>
+      {"".join(grids)}
+      {discrepancies}
+    </div>
+    """
+
+
+def attempt_html(attempt: Attempt) -> str:
+    rejected = attempt.verdict == "failed"
+    confidence = f"conf {attempt.confidence:.2f}"
+    if attempt.adjusted is not None and attempt.adjusted != attempt.confidence:
+        confidence += f" → {attempt.adjusted:.2f}"
+    request = (
+        f'<p class="p2p-request">Information request: {h(attempt.information_request)}</p>'
+        if attempt.information_request
+        else ""
+    )
+    if attempt.verdict is None:
+        critique = ""
+    else:
+        if rejected:
+            title = "Critic rejected"
+            if attempt.adjustment:
+                title += f" · confidence {attempt.adjustment:+.2f}"
+        else:
+            title = "Critic passed"
+        lines = "".join(f"<span>{h(issue)}</span>" for issue in attempt.issues)
+        lines += "".join(
+            f'<span class="p2p-muted">Recommended: {h(change)}</span>' for change in attempt.changes
+        )
+        if not lines and not rejected:
+            lines = "<span>Recommendation is grounded in matcher evidence.</span>"
+        critique = f"""
+        <div class="p2p-critique p2p-critique-{"failed" if rejected else "passed"}">
+          {icon("gpp_bad" if rejected else "verified")}
+          <div><strong>{h(title)}</strong>{lines}</div>
+        </div>
+        """
+    return f"""
+    <div class="p2p-attempt{" p2p-attempt-rejected" if rejected else ""}">
+      <div class="p2p-attempt-body">
+        <div class="p2p-attempt-head">
+          <span class="p2p-label">Attempt {attempt.number} · Resolution agent</span>
+          <span>{action_pill(attempt.action)}<span class="p2p-muted">{h(confidence)}</span></span>
+        </div>
+        <p>{h(attempt.rationale)}</p>
+        {request}
+      </div>
+      {critique}
+    </div>
+    """
+
+
+def ai_html(story: AiStoryView) -> str:
+    if not story.invoked:
+        return f"""
+        <div class="p2p-tab-body">
+          <div class="p2p-callout">{icon("bolt")}<div><strong>AI not invoked</strong><span>{h(story.not_invoked_text)}</span></div></div>
+        </div>
+        """
+    investigation = story.investigation
+    error = (
+        f'<div class="p2p-callout p2p-callout-warning">{icon("warning")}<div><strong>Model output failed validation; the case was routed to a reviewer.</strong><code>{h(story.model_error)}</code></div></div>'
+        if story.model_error
+        else ""
+    )
+    diff = ""
+    if story.diff:
+        rows = "".join(
+            f'<div class="p2p-diff-row"><span>{h(name)}</span><del>{h(before)}</del>{icon("arrow_forward")}<ins>{h(after)}</ins></div>'
+            for name, before, after in story.diff
+        )
+        diff = f'<div class="p2p-diff"><div class="p2p-diff-head">What changed between attempts</div>{rows}</div>'
+    return f"""
+    <div class="p2p-tab-body">
+      <h3 class="p2p-subhead">{h(story.title)}</h3>
+      {error}
+      <div class="p2p-investigator">
+        <span class="p2p-label">Investigator</span>
+        <strong>{h(investigation.root_cause)}</strong>
+        <span class="p2p-muted">Missing: {h(investigation.missing)} · suggests {h(investigation.action)} · confidence {investigation.confidence:.2f}</span>
+      </div>
+      {"".join(attempt_html(attempt) for attempt in story.attempts)}
+      {diff}
+    </div>
+    """
+
+
+def policy_html(view: PolicyView | None, rules_name: str) -> str:
+    if view is None:
+        return '<div class="p2p-tab-body"><p class="p2p-caption">Policy has not run for this case yet.</p></div>'
+    verdict_icon = {"approved": "verified", "rejected": "block", "review": "gavel"}[
+        view.verdict_key
+    ]
+    if view.checks:
+        body = "".join(
+            f"""
+            <div class="p2p-check p2p-check-{str(check["passed"]).lower()}">
+              {icon(CHECK_ICONS[check["passed"]])}
+              <strong>{h(check["label"])}</strong>
+              <span class="p2p-muted">{h(check["threshold"])}</span>
+              <span class="p2p-check-actual">{h(check["actual"])}</span>
+            </div>
+            """
+            for check in view.checks
+        )
+    else:
+        body = "<ul>" + "".join(f"<li>{h(reason)}</li>" for reason in view.reasons) + "</ul>"
+        body += f'<p class="p2p-caption">{h(view.caption)}</p>'
+    return f"""
+    <div class="p2p-tab-body">
+      <div class="p2p-verdict p2p-verdict-{view.verdict_key}">{icon(verdict_icon)}{h(view.verdict)}</div>
+      <div class="p2p-checklist">{body}</div>
+      <code class="p2p-source">Source: {h(rules_name)}</code>
+    </div>
+    """
+
+
+def event_html(event: TimelineEvent) -> str:
+    details = "".join(
+        f'<div class="p2p-kv"><code>{h(key)}</code><span>{h(value)}</span></div>'
+        for key, value in event.details
+    )
+    return f"""
+    <div class="p2p-event-card">
+      <span class="p2p-label">Event details</span>
+      <strong>{h(event.label)}</strong>
+      <span class="p2p-muted">{h(event.time)} · {h(event.relative)} · {h(event.actor)}</span>
+      {details}
+    </div>
+    """
+
+
+def render_timeline(case_id: str, events: list[TimelineEvent]) -> None:
+    if not events:
+        st.info("No audit events recorded.")
+        return
+    left, right = st.columns([3, 2])
+    with left:
+        selected = st.radio(
+            "Event",
+            range(len(events)),
+            index=len(events) - 1,
+            format_func=lambda index: f"{events[index].time} · {events[index].label}",
+            captions=[f"{event.actor} · {event.delta}" for event in events],
+            key=f"timeline_{case_id}",
+            label_visibility="collapsed",
+        )
+    with right:
+        render_html(event_html(events[selected]))
+
+
+def render_case_detail(case: dict, app: CaseService) -> None:
     if not case:
         st.error("The selected case could not be loaded.")
         return
+    runtime = app.runtime
+    rules = runtime.rules
+    state = case.get("state") or {}
+    now = datetime.now(UTC)
+    zone = local_zone(st.context.timezone)
 
-    state = case["state"]
-    invoice = case["invoice"]
-    status = display_status(case)
-    render_html(
-        f"""
-        <div class="p2p-case-hero">
-          <div class="p2p-case-kicker">Exception case</div>
-          <div class="p2p-case-title">{h(case["case_id"])}</div>
-          <div class="p2p-case-meta">
-            {status_pill(status.key, status.label)}
-            <span>{h(invoice["supplier_name"])}</span><span>·</span><span>{h(invoice["invoice_id"])}</span>
-          </div>
-        </div>
-        <div class="p2p-case-summary-grid">
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice</div><div class="p2p-summary-value">{h(invoice["invoice_id"])}</div></div>
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Supplier</div><div class="p2p-summary-value" title="{h(invoice["supplier_name"])}">{h(invoice["supplier_name"])}</div></div>
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Purchase order</div><div class="p2p-summary-value">{h(invoice.get("po_number") or "Missing")}</div></div>
-          <div class="p2p-summary-card"><div class="p2p-summary-label">Invoice total</div><div class="p2p-summary-value">{h(format_money(invoice["total"], invoice["currency"]))}</div></div>
-        </div>
-        """,
+    header = case_header(case, now, current_reviewer(), zone)
+    match = match_view(state, rules)
+    story = ai_story(case, rules)
+    policy = policy_view(state)
+    events = timeline(case, zone, now)
+
+    render_html(header_html(header))
+    with st.popover(":material/link: Copy link"):
+        st.code(case_link(case["case_id"]), language=None)
+    outcome = outcome_view(case)
+    if outcome:
+        render_html(outcome_html(outcome))
+
+    labels = tab_labels(match, story, policy, len(events))
+    tabs = dict(
+        zip(
+            labels,
+            st.tabs(
+                list(labels.values()),
+                default=labels[default_tab(story)],
+                key=f"case_tabs_{case['case_id']}",
+            ),
+            strict=True,
+        )
     )
-
-    tabs = st.tabs(["Workflow", "Invoice & ERP", "Decision", "Audit timeline"])
-    with tabs[0]:
-        erp = state.get("erp_context", {})
-        timeline = [
-            stage("Invoice validated", "Schema, line totals, and required fields passed"),
-            stage(
-                "ERP context loaded",
-                f"PO {'found' if erp.get('purchase_order') else 'missing'} · "
-                f"{len(erp.get('goods_receipts', []))} goods receipt(s)",
-                not erp.get("purchase_order"),
-            ),
-            stage(
-                "Three-way match completed",
-                "Invoice, purchase order, and goods receipt compared deterministically",
-            ),
-        ]
-        if state.get("investigation"):
-            investigation = state["investigation"]
-            timeline.append(
-                stage(
-                    "AI investigation completed",
-                    f"{investigation['root_cause']} · {investigation['confidence']:.0%} confidence",
-                )
-            )
-        if state.get("resolution"):
-            resolution = state["resolution"]
-            timeline.append(
-                stage(
-                    "Resolution proposed",
-                    f"{label_action(resolution['action'])} · {resolution['confidence']:.0%} confidence",
-                )
-            )
-        if state.get("critique"):
-            critique = state["critique"]
-            timeline.append(
-                stage(
-                    "Critic passed" if critique["valid"] else "Critic requested revision",
-                    f"{state.get('reflection_count', 0)} reflection cycle(s)",
-                    not critique["valid"],
-                )
-            )
-        render_html(f'<div class="p2p-timeline">{"".join(timeline)}</div>')
-        render_html('<div class="p2p-section-title">Match findings</div>')
-        render_discrepancies(state)
-        policy = state.get("policy_result")
-        if policy:
-            reasons = "".join(f"<li>{h(reason)}</li>" for reason in policy["reasons"])
-            verdict = (
-                "Autonomous action permitted" if policy["permitted"] else "Human review required"
-            )
-            render_html(
-                f"""
-                <div class="p2p-guardrail">
-                  <div class="p2p-guardrail-mark">{icon("policy")}</div>
-                  <div><strong>Deterministic policy · {h(verdict)}</strong><ul>{reasons}</ul></div>
-                </div>
-                """,
-            )
-    with tabs[1]:
-        st.markdown("#### Invoice lines")
-        st.dataframe(invoice["line_items"], width="stretch", hide_index=True)
-        st.markdown("#### ERP context")
-        st.json(state.get("erp_context", {}), expanded=False)
-    with tabs[2]:
-        if state.get("investigation"):
-            investigation = state["investigation"]
-            evidence = ", ".join(item["evidence_id"] for item in investigation["evidence"])
-            missing = investigation["missing_information"]
-            render_html(
-                f"""
-                <div class="p2p-decision-card">
-                  <div class="p2p-decision-label">AI interpretation · verify against evidence</div>
-                  <div class="p2p-decision-title">{h(investigation["root_cause"])}</div>
-                  <div class="p2p-decision-copy"><strong>Evidence</strong> · {h(evidence or "None cited")}</div>
-                  {f'<div class="p2p-decision-copy"><strong>Missing</strong> · {h("; ".join(missing))}</div>' if missing else ""}
-                </div>
-                """,
-            )
-        if state.get("resolution"):
-            resolution = state["resolution"]
-            request = resolution.get("information_request")
-            render_html(
-                f"""
-                <div class="p2p-decision-card">
-                  <div class="p2p-decision-label">Proposed resolution</div>
-                  <div class="p2p-decision-title">{action_pill(resolution["action"])}</div>
-                  <div class="p2p-decision-copy">{h(resolution["rationale"])}</div>
-                  {f'<div class="p2p-request-copy">{h(request)}</div>' if request else ""}
-                </div>
-                """,
-            )
-        proposals = [
-            event
-            for event in case.get("audit", [])
-            if event["event_type"] in {"RESOLUTION_PROPOSED", "RESOLUTION_REVISED"}
-        ]
-        if proposals:
-            with st.expander("Recommendation history"):
-                for proposal in proposals:
-                    st.json(proposal)
-        if state.get("critique"):
-            critique = state["critique"]
-            verdict = "Valid" if critique["valid"] else "Revision required"
-            issues = "".join(
-                f'<div class="p2p-decision-copy">• {h(issue)}</div>' for issue in critique["issues"]
-            )
-            render_html(
-                f"""
-                <div class="p2p-decision-card">
-                  <div class="p2p-decision-label">Reflexion</div>
-                  <div class="p2p-decision-title">{h(verdict)}</div>{issues}
-                </div>
-                """,
-            )
-        if state.get("outcome"):
-            outcome = state["outcome"]
-            render_html(
-                f"""
-                <div class="p2p-decision-card">
-                  <div class="p2p-decision-label">Final outcome · {h(outcome["source"].replace("_", " ").title())}</div>
-                  <div class="p2p-decision-title">{action_pill(outcome["action"])}</div>
-                  <div class="p2p-decision-copy">{h(outcome["rationale"])}</div>
-                </div>
-                """,
-            )
-    with tabs[3]:
-        audit = case.get("audit", [])
-        if not audit:
-            st.info("No audit events recorded.")
-        for event in audit:
-            render_html(
-                f"""
-                <div class="p2p-audit-row">
-                  <div class="p2p-audit-node"></div>
-                  <div>
-                    <div class="p2p-audit-title">{h(label_event(event["event_type"]))}</div>
-                    <div class="p2p-audit-meta">{h(event["timestamp"])} · {h(event["actor"])}</div>
-                  </div>
-                </div>
-                """,
-            )
-            if event.get("data"):
-                with st.expander("Event data"):
-                    st.json(event["data"], expanded=False)
+    with tabs["match"]:
+        render_html(match_html(match))
+    with tabs["ai"]:
+        render_html(ai_html(story))
+    with tabs["policy"]:
+        rules_name = runtime.rules_path.name if runtime.rules_path else "business rules"
+        render_html(policy_html(policy, rules_name))
+    with tabs["timeline"]:
+        render_timeline(case["case_id"], events)

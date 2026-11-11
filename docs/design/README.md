@@ -130,7 +130,7 @@ Measured on `main` @ `4d4abf8` with fresh storage per scenario, in demo mode:
 |05 exceeds receipt|QUANTITY_EXCEEDS_RECEIPT MATERIAL|REQUEST_INFO 0.91|deterministic_eligibility, hard_financial_control|PENDING_REVIEW|10|
 |06 missing PO|MISSING_PO MATERIAL|ESCALATE 0.72|deterministic_eligibility, allowed_action, missing_po.require_human_review, confidence.auto_resolve|PENDING_REVIEW|10|
 |07 missing GRN|MISSING_GRN MATERIAL|REQUEST_INFO 0.82|deterministic_eligibility, missing_receipt.require_human_review, confidence.auto_resolve|PENDING_REVIEW|10|
-|08 duplicate|DUPLICATE_INVOICE CRITICAL|REJECT 0.99 (AI runs today)|duplicate_invoice.auto_reject|COMPLETED, REJECT, AUTONOMOUS|10 (6 after Phase 3)|
+|08 duplicate|DUPLICATE_INVOICE CRITICAL|not invoked (before Phase 3: REJECT 0.99)|duplicate_invoice.auto_reject|COMPLETED, REJECT, AUTONOMOUS|7 (10 before Phase 3)|
 |09 supplier mismatch|SUPPLIER_MISMATCH CRITICAL|ESCALATE 0.96|deterministic_eligibility, allowed_action, hard_financial_control|PENDING_REVIEW|10|
 |10 high value|none|not invoked|risk.human_review_invoice_value|PENDING_REVIEW|6|
 

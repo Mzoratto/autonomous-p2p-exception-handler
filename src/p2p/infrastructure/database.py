@@ -5,7 +5,7 @@ import json
 import os
 import threading
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,11 @@ from p2p.domain.models import (
     PurchaseOrderLine,
     Supplier,
 )
+
+
+def _utcnow() -> datetime:
+    """Storage keeps naive UTC; every value leaving the repository is tz-aware."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
@@ -67,7 +72,7 @@ class CaseRow(Base):
     status: Mapped[str] = mapped_column(String, index=True)
     invoice_payload: Mapped[str] = mapped_column(Text)
     state_payload: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
 class CaseCommandRow(Base):
@@ -288,7 +293,7 @@ class SqliteRepository:
                 if row.status != status or row.state_payload != payload:
                     row.status = status
                     row.state_payload = payload
-                    row.updated_at = datetime.utcnow()
+                    row.updated_at = _utcnow()
             if status == "COMPLETED":
                 outcome = state.get("outcome")
                 if not outcome:
@@ -305,7 +310,7 @@ class SqliteRepository:
                             AuditEventRow(
                                 event_id=event_id,
                                 case_id=case_id,
-                                timestamp=datetime.utcnow(),
+                                timestamp=_utcnow(),
                                 event_type=event_type.value,
                                 actor="human_reviewer"
                                 if event_type == AuditEventType.HUMAN_DECISION_RECEIVED
@@ -335,7 +340,7 @@ class SqliteRepository:
             "status": row.status,
             "invoice": json.loads(row.invoice_payload),
             "state": json.loads(row.state_payload),
-            "updated_at": row.updated_at.isoformat(),
+            "updated_at": row.updated_at.replace(tzinfo=UTC).isoformat(),
         }
 
     def record(self, event: AuditEvent) -> None:
@@ -365,7 +370,7 @@ class SqliteRepository:
                 AuditEvent(
                     event_id=row.event_id,
                     case_id=row.case_id,
-                    timestamp=row.timestamp,
+                    timestamp=row.timestamp.replace(tzinfo=UTC),
                     event_type=row.event_type,
                     actor=row.actor,
                     data=json.loads(row.data_payload),
