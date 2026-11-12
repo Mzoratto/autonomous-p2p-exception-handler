@@ -183,6 +183,8 @@ def ai_html(story: AiStoryView) -> str:
         </div>
         """
     investigation = story.investigation
+    if investigation is None:  # ai_story always builds one for an invoked story
+        raise ValueError("An invoked AI story has no investigation")
     headline = (
         "Model unavailable; the case was routed to a reviewer."
         if story.model_unavailable

@@ -24,6 +24,9 @@ dev = [
   "pytest>=9.0.3,<10",
   "pytest-cov>=7,<8",
   "ruff>=0.9,<1",
+  # Exact pin: a new pyright release can add findings; bump it in its own PR.
+  # The nodejs extra installs Node as a wheel, so the check needs no Node download.
+  "pyright[nodejs]==1.1.414",
 ]
 
 [project.scripts]
@@ -55,3 +58,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "standard"
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"

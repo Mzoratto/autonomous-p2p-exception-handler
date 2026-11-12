@@ -5,10 +5,10 @@ from typing import Any
 
 from p2p.domain.models import CritiqueResult, InvestigationResult, Resolution
 from p2p.intelligence.prompts import CRITIC_SYSTEM, INVESTIGATOR_SYSTEM, RESOLVER_SYSTEM
-from p2p.ports import ModelProvider
+from p2p.ports import ChatMessage, ModelProvider
 
 
-def _messages(system: str, context: dict[str, Any]) -> list[dict[str, str]]:
+def _messages(system: str, context: dict[str, Any]) -> list[ChatMessage]:
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(context, default=str, sort_keys=True)},

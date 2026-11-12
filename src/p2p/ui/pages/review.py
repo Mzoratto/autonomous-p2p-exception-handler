@@ -261,6 +261,7 @@ def decision_panel(case: dict, app) -> None:
         disabled=decision is None,
         key=f"review_submit_{case_id}",
     ):
+        assert decision is not None, "Submit is disabled until a decision is chosen"
         cleaned = (note or "").strip()
         if decision in NOTE_REQUIRED and len(cleaned) < MIN_NOTE:
             st.error(
@@ -303,9 +304,10 @@ def render() -> None:
         return
 
     by_id = {row["case_id"]: row for row in pending}
-    selected_id = st.query_params.get("case")
-    if selected_id not in by_id:
-        selected_id = pending[0]["case_id"]
+    requested = st.query_params.get("case")
+    selected_id: str = (
+        requested if requested is not None and requested in by_id else pending[0]["case_id"]
+    )
     st.query_params["case"] = selected_id
     late_after = app.runtime.rules.review.sla_hours * 3600
     case, failure = None, None

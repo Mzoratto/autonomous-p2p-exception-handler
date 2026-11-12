@@ -139,8 +139,12 @@ def create_runtime(
             seed_database(database)
 
     use_demo = _is_true(os.getenv("DEMO_MODE", "true")) if demo_mode is None else demo_mode
-    provider = MockModelProvider() if use_demo else OpenAIModelProvider()
-    model_name = "Mock provider" if use_demo else provider.model
+    provider: MockModelProvider | OpenAIModelProvider
+    if use_demo:
+        provider, model_name = MockModelProvider(), "Mock provider"
+    else:
+        live = OpenAIModelProvider()
+        provider, model_name = live, live.model
     deps = WorkflowDependencies(
         erp=repository,
         audit=repository,
@@ -230,9 +234,16 @@ class CaseService:
             "is_replay": is_replay,
         }
 
+    def _stored_case(self, case_id: str) -> dict:
+        """A case this command already knows exists; a missing row is a storage fault."""
+        case = self.runtime.repository.get_case(case_id)
+        if case is None:
+            raise LookupError(f"No persisted case exists for {case_id}")
+        return case
+
     def _reconcile(self, case_id: str) -> dict:
         repository = self.runtime.repository
-        case = repository.get_case(case_id)
+        case = self._stored_case(case_id)
         snapshot = self.runtime.graph.get_state({"configurable": {"thread_id": case_id}})
         if not snapshot.values:
             if case["status"] == "PENDING_REVIEW":
@@ -261,7 +272,7 @@ class CaseService:
         else:
             status = "PROCESSING"
         repository.save_case(case_id, state["invoice"], status, state)
-        return repository.get_case(case_id)
+        return self._stored_case(case_id)
 
     def _run(self, case_id: str, action: str, graph_input: Any, config: dict) -> dict:
         """Run the graph for one command; a failure is stored on the case, then re-raised."""
@@ -306,7 +317,7 @@ class CaseService:
             config = {"configurable": {"thread_id": case_id}}
             # A replay returns a case that was already settled before this call; a case that
             # was still PROCESSING and is recovered here is not a replay.
-            settled_before = repository.get_case(case_id)["status"] != "PROCESSING"
+            settled_before = self._stored_case(case_id)["status"] != "PROCESSING"
             case = self._reconcile(case_id)
             if case["status"] != "PROCESSING":
                 return self._result(case, is_replay=not created and settled_before)

@@ -5,6 +5,7 @@ import math
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
 from urllib.parse import urlsplit
@@ -22,12 +23,18 @@ from p2p.domain.models import (
     Resolution,
     Severity,
 )
-from p2p.ports import ModelAuthenticationError, ModelConfigurationError, ModelUnavailableError
+from p2p.ports import (
+    ChatMessage,
+    ModelAuthenticationError,
+    ModelConfigurationError,
+    ModelUnavailableError,
+)
 
 T = TypeVar("T", bound=BaseModel)
+N = TypeVar("N", int, float)
 
 
-def _payload(messages: list[dict[str, str]]) -> dict:
+def _payload(messages: list[ChatMessage]) -> dict:
     try:
         return json.loads(messages[-1]["content"])
     except (json.JSONDecodeError, KeyError, IndexError) as exc:
@@ -39,14 +46,15 @@ class MockModelProvider:
 
     last_call: dict = {"provider": "mock", "model": "mock"}
 
-    def structured_response(self, schema: type[T], messages: list[dict[str, str]]) -> T:
+    def structured_response(self, schema: type[T], messages: list[ChatMessage]) -> T:
         context = _payload(messages)
+        # model_validate returns these instances unchanged; it narrows them to `schema`.
         if schema is InvestigationResult:
-            return self._investigate(context)  # type: ignore[return-value]
+            return schema.model_validate(self._investigate(context))
         if schema is Resolution:
-            return self._resolve(context)  # type: ignore[return-value]
+            return schema.model_validate(self._resolve(context))
         if schema is CritiqueResult:
-            return self._critique(context)  # type: ignore[return-value]
+            return schema.model_validate(self._critique(context))
         raise ValueError(f"Mock provider does not support schema {schema.__name__}")
 
     @staticmethod
@@ -201,7 +209,7 @@ def drop_blank_openai_settings() -> None:
         del os.environ[name]
 
 
-def _number(name: str, default: str, kind: type, minimum: float, unit: str) -> float | int:
+def _number(name: str, default: str, kind: Callable[[str], N], minimum: float, unit: str) -> N:
     raw = os.environ.get(name, default).strip()
     try:
         value = kind(raw)
@@ -234,7 +242,12 @@ class ModelSettings:
 
     @property
     def host(self) -> str:
-        return urlsplit(self.base_url).hostname if self.base_url else OPENAI_DEFAULT_HOST
+        if not self.base_url:
+            return OPENAI_DEFAULT_HOST
+        host = urlsplit(self.base_url).hostname
+        if host is None:  # from_env only accepts URLs with a host
+            raise ValueError("base_url has no host")
+        return host
 
     @classmethod
     def from_env(cls) -> ModelSettings:
@@ -298,13 +311,13 @@ class OpenAIModelProvider:
         )
         self.last_call: dict | None = None
 
-    def structured_response(self, schema: type[T], messages: list[dict[str, str]]) -> T:
+    def structured_response(self, schema: type[T], messages: list[ChatMessage]) -> T:
         self.last_call = None  # Never report the previous call for a request that failed.
         started = time.monotonic()
         try:
             response = self.client.responses.parse(
                 model=self.model,
-                input=messages,
+                input=[{"role": item["role"], "content": item["content"]} for item in messages],
                 text_format=schema,
                 store=False,
             )

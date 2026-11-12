@@ -18,6 +18,7 @@ from sqlalchemy import (
     Float,
     Integer,
     String,
+    Table,
     Text,
     create_engine,
     event,
@@ -124,6 +125,18 @@ class CaseRow(Base):
     # error records or the migration backfill.
     superseded_by: Mapped[str | None] = mapped_column(String, nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+def _table(model: type[Base]) -> Table:
+    """The mapped Table; SQLAlchemy types `__table__` as the wider FromClause."""
+    table = model.__table__
+    if not isinstance(table, Table):
+        raise TypeError(f"{model.__name__} is not mapped to a single table")
+    return table
+
+
+# Core statements on the cases table that must not load ORM rows (e.g. undecodable payloads).
+CASES = _table(CaseRow)
 
 
 PROJECTED_COLUMNS = (
@@ -270,7 +283,10 @@ class Database:
             for case_id in case_ids:
                 # One commit per row: a value SQLite rejects rolls back only that row.
                 try:
-                    self._backfill(session, session.get(CaseRow, case_id))
+                    row = session.get(CaseRow, case_id)
+                    if row is None:  # selected a moment ago in this session
+                        raise LookupError(f"Case {case_id} disappeared during migration")
+                    self._backfill(session, row)
                     session.commit()
                 except Exception as exc:
                     session.rollback()
@@ -279,10 +295,10 @@ class Database:
                         raise
                     # Mark without loading the row again: its payloads may not even decode.
                     session.execute(
-                        update(CaseRow.__table__)
-                        .where(CaseRow.__table__.c.case_id == case_id)
+                        update(CASES)
+                        .where(CASES.c.case_id == case_id)
                         .values(
-                            created_at=CaseRow.__table__.c.updated_at,
+                            created_at=CASES.c.updated_at,
                             last_error="Migration could not read stored state: "
                             f"{type(exc).__name__}",
                         )
@@ -468,12 +484,12 @@ class SqliteRepository:
         now = _utcnow()
         # Conditional on the same facts, so two linkers can never both release one case.
         released = session.execute(
-            update(CaseRow.__table__)
+            update(CASES)
             .where(
-                CaseRow.__table__.c.case_id == held_id,
-                CaseRow.__table__.c.superseded_by.is_(None),
-                CaseRow.__table__.c.status == "COMPLETED",
-                CaseRow.__table__.c.outcome_action == "REQUEST_INFO",
+                CASES.c.case_id == held_id,
+                CASES.c.superseded_by.is_(None),
+                CASES.c.status == "COMPLETED",
+                CASES.c.outcome_action == "REQUEST_INFO",
             )
             .values(superseded_by=case_id, superseded_at=now, updated_at=now)
         )
@@ -535,6 +551,8 @@ class SqliteRepository:
             command = session.get(CaseCommandRow, case_id)
             if command is None:
                 case = session.get(CaseRow, case_id)
+                if case is None:
+                    raise LookupError(f"No persisted case exists for {case_id}")
                 invoice = Invoice.model_validate_json(case.invoice_payload)
                 command = CaseCommandRow(
                     case_id=case_id,
@@ -778,7 +796,9 @@ class SqliteRepository:
             order = [column.desc() if descending else column.asc()]
         statement = statement.order_by(*order, CaseRow.case_id)
         with self.database.session_factory() as session:
-            total = session.scalar(select(func.count()).select_from(statement.subquery()))
+            total = session.execute(
+                select(func.count()).select_from(statement.subquery())
+            ).scalar_one()
             if limit is not None:
                 statement = statement.limit(limit).offset(offset)
             return [self._row_dict(row) for row in session.scalars(statement)], total
@@ -786,7 +806,9 @@ class SqliteRepository:
     def view_counts(self) -> dict[str, int]:
         with self.database.session_factory() as session:
             return {
-                view: session.scalar(select(func.count(CaseRow.case_id)).where(*conditions))
+                view: session.execute(
+                    select(func.count(CaseRow.case_id)).where(*conditions)
+                ).scalar_one()
                 for view, conditions in CASE_VIEWS.items()
             }
 
@@ -799,9 +821,7 @@ class SqliteRepository:
             ).first()
             if current is not None and current.last_error != message:
                 session.execute(
-                    update(CaseRow.__table__)
-                    .where(CaseRow.__table__.c.case_id == case_id)
-                    .values(last_error=message)
+                    update(CASES).where(CASES.c.case_id == case_id).values(last_error=message)
                 )
                 session.commit()
 
@@ -871,7 +891,7 @@ class SqliteRepository:
                     event_id=row.event_id,
                     case_id=row.case_id,
                     timestamp=row.timestamp.replace(tzinfo=UTC),
-                    event_type=row.event_type,
+                    event_type=AuditEventType(row.event_type),
                     actor=row.actor,
                     data=json.loads(row.data_payload),
                 )

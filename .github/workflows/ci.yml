@@ -43,6 +43,21 @@ jobs:
         if: matrix.python-version == '3.11'
         run: make audit
 
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.11.29"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install
+        run: uv sync --frozen --extra dev --python 3.11
+      - name: Pyright
+        run: make typecheck
+
   docker:
     name: docker image
     runs-on: ubuntu-latest

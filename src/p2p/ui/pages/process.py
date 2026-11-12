@@ -283,25 +283,26 @@ def validate_step() -> None:
         with st.container(horizontal=True, horizontal_alignment="right"):
             st.button("Back", key="process_back", on_click=go_to, args=(0,))
             run_clicked = st.button("Run workflow", type="primary", key="process_run")
-        if run_clicked and held is None:
-            run(invoice)
-        elif run_clicked and len(note) < MIN_NOTE:
-            st.error(f"Add a note of at least {MIN_NOTE} characters to supersede a held case.")
-        elif run_clicked:
-            st.session_state["process_confirm"] = {
-                "held_case_id": held["case_id"],
-                "held_invoice_id": held["invoice_id"],
-                "note": note,
-            }
+        if run_clicked:
+            if held is None:
+                run(invoice)
+            elif len(note) < MIN_NOTE:
+                st.error(f"Add a note of at least {MIN_NOTE} characters to supersede a held case.")
+            else:
+                st.session_state["process_confirm"] = {
+                    "held_case_id": held["case_id"],
+                    "held_invoice_id": held["invoice_id"],
+                    "note": note,
+                }
     if st.session_state.get("process_confirm"):
         confirm_supersede(invoice)
 
 
 def result_step() -> None:
     app = service()
-    case_id = st.session_state.get("process_case_id")
+    case_id: str | None = st.session_state.get("process_case_id")
     case = app.get_case(case_id) if case_id else None
-    if not case:
+    if not case_id or not case:
         st.error("The processed case could not be loaded.")
         st.button("Process another", key="process_another", on_click=reset)
         return
