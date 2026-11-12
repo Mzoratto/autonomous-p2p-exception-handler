@@ -58,3 +58,10 @@ class ModelConfigurationError(RuntimeError):
         super().__init__(title)
         self.title = title
         self.fix = fix
+
+
+class SupersedeRefusedError(ValueError):
+    """A corrected invoice cannot supersede the named held case; nothing was stored.
+
+    The message is written for the reviewer.
+    """

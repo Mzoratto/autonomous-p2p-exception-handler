@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 import streamlit as st
 from pydantic import ValidationError
 
-from p2p.domain.models import Invoice
-from p2p.ports import ModelAuthenticationError
+from p2p.domain.models import Invoice, SupersedeRequest
+from p2p.ports import ModelAuthenticationError, SupersedeRefusedError
 from p2p.ui.components.chips import h, icon, render_html, status_pill
 from p2p.ui.components.shell import (
     mark_authentication_failure,
@@ -16,6 +16,7 @@ from p2p.ui.components.shell import (
     switch_to,
     top_bar,
 )
+from p2p.ui.identity import current_reviewer
 from p2p.ui.runtime import service
 from p2p.ui.scenarios import AI_REVIEW, SCENARIOS, VALUE_REVIEW
 from p2p.ui.viewmodels import (
@@ -34,8 +35,11 @@ STATE_KEYS = (
     "process_errors",
     "process_case_id",
     "process_is_replay",
+    "process_supersedes",
+    "process_confirm",
 )
 TAG_CLASSES = {AI_REVIEW: "ai", VALUE_REVIEW: "value"}
+MIN_NOTE = 3
 
 
 def go_to(step: int) -> None:
@@ -45,6 +49,11 @@ def go_to(step: int) -> None:
 def reset() -> None:
     for key in STATE_KEYS:
         st.session_state.pop(key, None)
+    st.query_params.pop("supersedes", None)
+
+
+def clear_confirmation() -> None:
+    st.session_state.pop("process_confirm", None)
 
 
 def choose(label: str, invoice: Invoice | None, errors: list[tuple[str, str]] | None) -> None:
@@ -84,6 +93,12 @@ def stepper(current: int) -> None:
 
 def scenario_step() -> None:
     invoices = service().demo_invoices()
+    held_id = st.session_state.get("process_supersedes")
+    if held_id:
+        st.info(
+            f"Correcting held case {held_id}. Upload or paste the corrected invoice, "
+            "then link it to the held case on the next step."
+        )
     render_html('<h2 class="p2p-section-title">Demo scenarios</h2>')
     with st.container(horizontal=True, wrap=True, key="process-scenarios"):
         for scenario in SCENARIOS:
@@ -104,7 +119,7 @@ def scenario_step() -> None:
                     choose(f"{scenario.key} · {scenario.name}", invoice, None)
                     st.rerun()
 
-    with st.expander("Upload or paste JSON"):
+    with st.expander("Upload or paste JSON", expanded=bool(held_id)):
         upload = st.file_uploader("Invoice JSON", type=["json"], key="process_upload")
         pasted = st.text_area("Or paste invoice JSON", height=200, key="process_paste")
         if st.button("Validate invoice", key="process_validate"):
@@ -137,12 +152,15 @@ def checklist(invoice: Invoice) -> list[tuple[str, str]]:
     return rows
 
 
-def run(invoice: Invoice) -> None:
+def run(invoice: Invoice, supersede: SupersedeRequest | None = None) -> None:
     try:
         with st.spinner("Running workflow…"):
-            result = service().process_invoice(invoice)
+            result = service().process_invoice(invoice, supersede=supersede)
     except ModelAuthenticationError:
         mark_authentication_failure()
+    except SupersedeRefusedError as exc:
+        st.session_state["flash"] = {"kind": "error", "text": str(exc)}
+        st.rerun()
     except ValueError as exc:
         if "different content" in str(exc):
             st.error(
@@ -165,7 +183,84 @@ def run(invoice: Invoice) -> None:
         process_is_replay=result["is_replay"],
         process_step=2,
     )
+    if supersede is not None:
+        # The held case is superseded now; stop offering to correct it.
+        st.session_state.pop("process_supersedes", None)
+        st.query_params.pop("supersedes", None)
     st.rerun()
+
+
+def supersede_choice(invoice: Invoice) -> tuple[dict | None, str]:
+    """The held case this invoice replaces (None for a plain run) and the reviewer's note."""
+    requested = st.session_state.get("process_supersedes")
+    held = {row["case_id"]: row for row in service().held_cases_for(invoice)}
+    if requested and requested not in held:
+        st.warning(
+            f"{requested} can't be superseded by {invoice.invoice_id}. A correction replaces a "
+            "completed Request info case of the same supplier and purchase order that no other "
+            "invoice has superseded."
+        )
+    if not held:
+        return None, ""
+    options = [None, *held]
+    with st.container(border=True, key="process-supersede"):
+        render_html(
+            '<h3 class="p2p-panel-title">Corrects a held invoice</h3>'
+            '<p class="p2p-caption">Link this invoice to the held case it replaces. The held case '
+            "keeps its Request info outcome and releases its reserved quantities to this invoice. "
+            "The link can't be undone.</p>"
+        )
+        choice = st.selectbox(
+            "Held case",
+            options,
+            index=options.index(requested) if requested in held else 0,
+            format_func=lambda case_id: (
+                "No, process as a new invoice"
+                if case_id is None
+                else f"{case_id} · {held[case_id]['invoice_id']} · "
+                f"{format_money(held[case_id]['total'], held[case_id]['currency'])}"
+            ),
+            key="process_supersede_case",
+        )
+        if choice is None:
+            return None, ""
+        note = st.text_area(
+            "Note",
+            placeholder="Why does this invoice replace the held case?",
+            key="process_supersede_note",
+        )
+    return held[choice], note.strip()
+
+
+def confirm_supersede(invoice: Invoice) -> None:
+    request = st.session_state["process_confirm"]
+
+    def body() -> None:
+        render_html(
+            f"""
+            <p class="p2p-dialog-copy">{h(invoice.invoice_id)} replaces held case {h(request["held_case_id"])}. The held case keeps its Request info outcome and releases its reserved quantities; then the workflow checks {h(invoice.invoice_id)} as usual. The link is recorded on both cases and can't be undone.</p>
+            <div class="p2p-note-echo">{h(f"Note: {request['note']}")}</div>
+            """
+        )
+        with st.container(horizontal=True, horizontal_alignment="right"):
+            if st.button("Cancel", key="process_supersede_cancel"):
+                clear_confirmation()
+                st.rerun()
+            if st.button("Confirm supersede", key="process_supersede_confirm", type="primary"):
+                clear_confirmation()
+                run(
+                    invoice,
+                    SupersedeRequest(
+                        held_case_id=request["held_case_id"],
+                        reviewer=current_reviewer(),
+                        note=request["note"],
+                    ),
+                )
+
+    st.dialog(
+        f"Supersede {request['held_invoice_id']} with {invoice.invoice_id}?",
+        on_dismiss=clear_confirmation,
+    )(body)()
 
 
 def validate_step() -> None:
@@ -184,10 +279,22 @@ def validate_step() -> None:
             for field, text in checklist(invoice)
         )
         render_html(f'<div class="p2p-validation">{rows}</div>')
+        held, note = supersede_choice(invoice)
         with st.container(horizontal=True, horizontal_alignment="right"):
             st.button("Back", key="process_back", on_click=go_to, args=(0,))
-            if st.button("Run workflow", type="primary", key="process_run"):
-                run(invoice)
+            run_clicked = st.button("Run workflow", type="primary", key="process_run")
+        if run_clicked and held is None:
+            run(invoice)
+        elif run_clicked and len(note) < MIN_NOTE:
+            st.error(f"Add a note of at least {MIN_NOTE} characters to supersede a held case.")
+        elif run_clicked:
+            st.session_state["process_confirm"] = {
+                "held_case_id": held["case_id"],
+                "held_invoice_id": held["invoice_id"],
+                "note": note,
+            }
+    if st.session_state.get("process_confirm"):
+        confirm_supersede(invoice)
 
 
 def result_step() -> None:
@@ -214,6 +321,15 @@ def result_step() -> None:
                 "This invoice was already processed. Identical invoices return their original "
                 f"case, {case_id}."
             )
+        held = next(
+            (item["data"] for item in case["audit"] if item["event_type"] == "SUPERSEDES_CASE"),
+            None,
+        )
+        if held:
+            st.info(
+                f"Supersedes {held['held_case_id']} ({held['held_invoice_id']}). Its reserved "
+                "quantities were released to this invoice."
+            )
         if status.key == "recovery":
             st.warning(f"{case_id} needs recovery. Run the same invoice again to resume.")
         events = timeline(case, local_zone(st.context.timezone), datetime.now(UTC))
@@ -229,6 +345,9 @@ def result_step() -> None:
 
 
 def render() -> None:
+    requested = st.query_params.get("supersedes")
+    if requested:
+        st.session_state["process_supersedes"] = requested
     step = st.session_state.get("process_step", 0)
     top_bar(["Process invoice"], "/process")
     page_header(

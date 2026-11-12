@@ -31,6 +31,7 @@ OUTCOMES = {
     "approved": ("Approved", "#1f9a5e", "auto + human"),
     "rejected": ("Rejected", "#d23a50", "released reservations"),
     "request_info": ("Request info", "#2f6fed", "evidence requested"),
+    "superseded": ("Superseded", "#7f9cc4", "corrected invoice received"),
 }
 UP_IS_BAD, UP_IS_GOOD = ("#a6380f", "#14653f"), ("#14653f", "#a6380f")
 

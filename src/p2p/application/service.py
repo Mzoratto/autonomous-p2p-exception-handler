@@ -43,6 +43,7 @@ from p2p.domain.models import (
     PurchaseOrderLine,
     Resolution,
     Severity,
+    SupersedeRequest,
     Supplier,
 )
 from p2p.domain.policy import DecisionPolicy
@@ -285,12 +286,22 @@ class CaseService:
         )
         return self._result(case)
 
-    def process_invoice(self, invoice: Invoice, case_id: str | None = None) -> dict:
+    def process_invoice(
+        self,
+        invoice: Invoice,
+        case_id: str | None = None,
+        supersede: SupersedeRequest | None = None,
+    ) -> dict:
+        """Process an invoice; with `supersede`, it first replaces that held case.
+
+        The link is made in the same transaction as the claim, before the workflow loads
+        reservations, so the correction is checked without the held case's quantities.
+        """
         invoice = Invoice.model_validate(invoice.model_dump())
         repository = self.runtime.repository
         with repository.command_lock():
             case_id, created = repository.claim_case(
-                case_id or f"CASE-{uuid4().hex[:10].upper()}", invoice
+                case_id or f"CASE-{uuid4().hex[:10].upper()}", invoice, supersede
             )
             config = {"configurable": {"thread_id": case_id}}
             # A replay returns a case that was already settled before this call; a case that
@@ -327,6 +338,12 @@ class CaseService:
                 raise ValueError("No matching active human-review interrupt")
             submitted = repository.bind_review(case_id, review.model_dump(mode="json"), revision)
             return self._run(case_id, "Review", Command(resume=submitted), config)
+
+    def held_cases_for(self, invoice: Invoice) -> list[dict]:
+        """Held cases this invoice may supersede: same supplier and PO, Request info, unlinked."""
+        if not invoice.po_number:
+            return []
+        return self.runtime.repository.held_cases(invoice.supplier_id, invoice.po_number)
 
     def get_case(self, case_id: str) -> dict | None:
         """The reconciled case, or the stored row marked `busy` while a command holds the lock."""
@@ -437,7 +454,12 @@ class CaseService:
             "review": pending,
             "approved": [row for row in completed if row["outcome_action"] == "APPROVE"],
             "rejected": [row for row in completed if row["outcome_action"] == "REJECT"],
-            "request_info": [row for row in completed if row["outcome_action"] == "REQUEST_INFO"],
+            "request_info": [
+                row
+                for row in completed
+                if row["outcome_action"] == "REQUEST_INFO" and not row["superseded_by"]
+            ],
+            "superseded": [row for row in rows if row["superseded_by"]],
         }
         longest = sorted(pending, key=waited, reverse=True)[:12]
         counts = self.view_counts()

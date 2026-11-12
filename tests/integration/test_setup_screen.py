@@ -44,7 +44,7 @@ def test_invalid_base_url_shows_setup_with_its_own_fix(environment, monkeypatch)
 
 
 def test_rejected_key_while_processing_shows_setup_until_tried_again(environment, monkeypatch):
-    def rejected(self, invoice, case_id=None):
+    def rejected(self, invoice, case_id=None, supersede=None):
         raise ModelAuthenticationError("Incorrect API key provided")
 
     at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
