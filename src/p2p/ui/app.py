@@ -7,6 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from p2p.ports import ModelConfigurationError
 from p2p.ui.components.chips import h, render_html
 from p2p.ui.components.shell import SETUP_ERROR_KEY, load_styles, render_flash, setup_screen
 from p2p.ui.runtime import service
@@ -92,8 +93,8 @@ def main() -> None:
     configure_logging()
     try:
         app = service()
-    except RuntimeError:
-        setup_screen("Live mode needs an API key")
+    except ModelConfigurationError as exc:
+        setup_screen(exc.title, exc.fix)
     if st.session_state.get(SETUP_ERROR_KEY) == "auth":
         setup_screen("Live mode cannot authenticate")
     app.refresh_open_cases()

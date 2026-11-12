@@ -32,8 +32,14 @@ First release: the dashboard rebuilt to the "P2P Dashboard Revised" design in ei
 - **Phase 7B, #13:** responsive and accessibility pass (focus rings, 12 px minimum, target sizes, AA contrast), container-width layouts on the Review page, an indexed identity lookup, and documentation.
 
 ### Release
-- `make smoke-live` (`scripts/smoke_live.py`): runs the demo invoices through the live model on a copy of your database and reports status, decision source, model, tokens, latency and errors.
-- The OpenAI key is redacted from model errors, so it no longer reaches logs, stored case errors or the screen.
+- `make smoke-live` (`scripts/smoke_live.py`, #14, #15):
+  - Runs each demo invoice through the live model on its own fresh demo seed.
+  - Compares each outcome with what the mock provider produces, and shows which policy rules routed the case.
+  - Fails on a rejected key, on an unhandled exception, or when no model call succeeded.
+  - `--from-db` runs on a copy of your database instead.
+- The OpenAI key is redacted from model errors, so it no longer reaches logs, stored case errors or the screen. Errors now also name up to three underlying causes, redacted (#14, #15).
+- Empty or whitespace-only `OPENAI_*` settings count as unset. `OPENAI_BASE_URL=` from an example file had made the OpenAI SDK use an empty base URL and fail every call. Invalid base URLs and numbers now show the setup screen (#15).
+- `make run` listens on `localhost`, headless and without usage statistics; `ADDRESS=0.0.0.0` opens it to the network (#15).
 - Version 1.0.0.
 
 ### Remaining known limitations

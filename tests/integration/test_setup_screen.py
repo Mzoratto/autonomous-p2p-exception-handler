@@ -31,6 +31,18 @@ def test_live_mode_without_a_key_shows_setup_instead_of_a_traceback(environment,
     assert "DEMO_MODE=true" in markdown(at)
 
 
+def test_invalid_base_url_shows_setup_with_its_own_fix(environment, monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "false")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_BASE_URL", "proxy.example.com/v1")
+
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
+
+    assert not at.exception
+    assert [title.value for title in at.title] == ["OPENAI_BASE_URL is not a valid URL"]
+    assert "https://proxy.example.com/v1" in markdown(at)
+
+
 def test_rejected_key_while_processing_shows_setup_until_tried_again(environment, monkeypatch):
     def rejected(self, invoice, case_id=None):
         raise ModelAuthenticationError("Incorrect API key provided")

@@ -46,3 +46,15 @@ class ModelUnavailableError(RuntimeError):
 
 class ModelAuthenticationError(RuntimeError):
     """The model service rejected the credentials; a configuration fault, not an outage."""
+
+
+class ModelConfigurationError(RuntimeError):
+    """Live-mode settings that cannot work; the dashboard shows the setup screen instead.
+
+    The message is the setup screen's title; `fix` says what to change.
+    """
+
+    def __init__(self, title: str, fix: str):
+        super().__init__(title)
+        self.title = title
+        self.fix = fix

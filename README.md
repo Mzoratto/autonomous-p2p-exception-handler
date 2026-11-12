@@ -110,7 +110,7 @@ make seed
 make run
 ```
 
-Open <http://localhost:8501>. The seed command inserts missing ERP fixtures and writes ten JSON invoice scenarios without deleting existing cases or audit history. Startup seeds only empty storage. `make setup` installs the frozen `uv.lock` resolution.
+Open <http://localhost:8501>. `make run` starts Streamlit headless, without usage statistics, and listens on `localhost` only; the dashboard has no login. To reach it from another machine, run `make run ADDRESS=0.0.0.0` (the Docker image always binds `0.0.0.0` inside the container, and Compose publishes it on loopback). The seed command inserts missing ERP fixtures and writes ten JSON invoice scenarios without deleting existing cases or audit history. Startup seeds only empty storage. `make setup` installs the frozen `uv.lock` resolution.
 
 ### Demo mode
 
@@ -142,14 +142,14 @@ Never commit a real API key. `.env.local` is ignored by Git.
 
 ### Environment variables
 
-Read from the process environment, then `.env.local`, then `.env` (an existing variable is never overridden by a file).
+Read from the process environment, then `.env.local`, then `.env` (an existing variable is never overridden by a file). An empty or whitespace-only `OPENAI_*` value counts as unset, so `OPENAI_BASE_URL=` copied from an example file calls OpenAI directly. Invalid values (a base URL without `http(s)://` and a host, a non-numeric timeout or retry count) show the setup screen with the fix instead of failing every call.
 
 | Variable | Default | Effect |
 |---|---|---|
 | `DEMO_MODE` | `true` | `true` runs on the deterministic mock model; `false` calls OpenAI |
 | `OPENAI_API_KEY` | unset | Required when `DEMO_MODE=false`; without it the dashboard shows the setup screen |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | Model used by the Investigator, Resolver and Critic |
-| `OPENAI_BASE_URL` | unset | Alternative OpenAI-compatible endpoint |
+| `OPENAI_BASE_URL` | unset (OpenAI itself) | Proxy or OpenAI-compatible endpoint; an `http(s)` URL with a host |
 | `OPENAI_TIMEOUT_SECONDS` | `30` | Per-request timeout |
 | `OPENAI_MAX_RETRIES` | `1` | SDK retries before a request counts as failed (an outage) |
 | `P2P_DATABASE_URL` | `sqlite:///data/demo/p2p.db` | SQLite file for cases, audit events and checkpoints; must be a `sqlite:///` file path without query options |
@@ -176,17 +176,26 @@ The dashboard is available at <http://localhost:8501>. Compose binds the unauthe
 
 ## Before going live
 
-1. **Smoke-test the live model on a copy of your data.**
+1. **Smoke-test the live model.**
 
    ```bash
    export OPENAI_API_KEY=...   # in the shell, not only in .env.local
-   P2P_DATABASE_URL=sqlite:///path/to/your.db make smoke-live
+   make smoke-live
    ```
 
-   The script copies the database to a temporary file and works only on the copy, whose path it prints. It runs the ten demo invoices through the real model one at a time, under new invoice ids so the model is really called. It then prints, per invoice: status, decision source, model, tokens, latency and any error.
-   - **Pass:** it exits 0. A case sent to a reviewer because the model was unavailable is reported, not a failure.
-   - **Fail:** it exits 1 on a rejected key or any unhandled exception.
+   **What it runs:** each of the ten demo invoices on its own new database, seeded exactly like the demo data, so every scenario starts with untouched purchase orders and reservations. The run tests the model, not collisions with earlier cases.
+
+   **What it prints:**
+   - At the top: the mode, the base URL host, and whether a proxy variable is set. Proxy values are not shown, since they can hold credentials.
+   - Per invoice: Expected (what the mock provider produces for that scenario on a fresh seed), the live Status, Routed by (the policy rules that sent it to review, or `autonomous`), decision source, model, tokens, latency and any error.
+   - A count of how many outcomes match Expected.
+
+   **Result:**
+   - **Pass:** it exits 0. A case sent to a reviewer because the model was unavailable is reported, not a failure; so is a model that reaches a different outcome from the mock.
+   - **Fail:** it exits 1 on a rejected key, any unhandled exception, or when no model response was recorded in this run. Only responses received during this run count; a replayed case from your data does not.
    - **The key** is never printed.
+
+   **Your own data:** `P2P_DATABASE_URL=sqlite:///path/to/your.db make smoke-live ARGS=--from-db` runs all ten on a copy of that database instead, under new invoice ids; the database must exist. It warns that existing cases keep their PO reservations, so results there can differ from Expected.
 2. **Check the browser.** Open the app in Safari 16+ or Firefox 110+ as well as Chrome; the case detail layout uses CSS container queries.
 3. **Hand old Docker volumes to the new user.** A volume created by an image from before 1.0.0, which ran as root, needs the one-time `chown` shown above.
 

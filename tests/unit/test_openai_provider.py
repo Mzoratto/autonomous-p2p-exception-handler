@@ -178,3 +178,45 @@ def test_model_errors_never_carry_the_key(monkeypatch, error, raised_as):
     assert "7Hx2" not in str(raised.value)
     # The original error, which holds the key, is not chained into logged tracebacks.
     assert raised.value.__cause__ is None and raised.value.__suppress_context__
+
+
+def chained(top: Exception, *causes: Exception) -> Exception:
+    """`top` caused by causes[0], which was caused by causes[1], and so on."""
+    link = top
+    for cause in causes:
+        link.__cause__ = cause
+        link = cause
+    return top
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3])
+def test_model_errors_name_their_root_cause_without_the_key(monkeypatch, depth):
+    """A bare "Connection error." hid why live calls failed; the causes are now in the message."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-LEAKCHECK-7Hx2")
+    provider = OpenAIModelProvider()
+    causes = [OSError(f"level {level}") for level in range(1, 4)]
+    causes[depth - 1] = ValueError(f"bad header for sk-proj-LEAKCHECK-7Hx2 at level {depth}")
+    with_outcome(provider, chained(openai.APIConnectionError(request=REQUEST), *causes))
+
+    with pytest.raises(ModelUnavailableError) as raised:
+        provider.structured_response(Resolution, MESSAGES)
+
+    message = str(raised.value)
+    assert message.startswith("APIConnectionError: Connection error.; caused by ")
+    assert f"ValueError: bad header for [redacted] at level {depth}" in message
+    assert message.count("; caused by ") == 3
+    assert "7Hx2" not in message
+    assert raised.value.__cause__ is None and raised.value.__suppress_context__
+
+
+def test_only_three_levels_of_cause_are_described(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    provider = OpenAIModelProvider()
+    causes = [OSError(f"level {level}") for level in range(1, 5)]
+    with_outcome(provider, chained(openai.APIConnectionError(request=REQUEST), *causes))
+
+    with pytest.raises(ModelUnavailableError) as raised:
+        provider.structured_response(Resolution, MESSAGES)
+
+    assert "level 3" in str(raised.value)
+    assert "level 4" not in str(raised.value)
