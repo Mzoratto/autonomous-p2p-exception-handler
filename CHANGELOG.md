@@ -2,6 +2,47 @@
 
 All notable changes to this project are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-11-12
+
+### Added
+- **Supersede a held Request info invoice (#19).** From a held case's Cases detail, "Process corrected invoice" processes the supplier's corrected invoice (same supplier and PO, new invoice number) in place of the held case:
+  - The held case keeps its Request info outcome and is shown as "Request info · Superseded"; its PO quantities are released to the correction exactly once, in the same transaction as the correction's claim and before its workflow loads reservations.
+  - Both cases record the link in their audit trail (`CASE_SUPERSEDED`, `SUPERSEDES_CASE`) with the note, the released quantities, who chose Request info and who linked, and show "Same reviewer" when they are the same person.
+  - Ineligible links are refused and change nothing. A note of at least 3 characters and a confirmation are required.
+  - A new "Superseded" view on the Cases page and a "Superseded" outcome on the Overview.
+- **Sticky decision panel (#17).** On the Review page the decision panel, or the recovery card, stays in view while the case detail scrolls, whenever it sits beside the case detail (review workbench at least 1016 px wide). Scoped CSS; where the panel wraps below the case detail nothing changes.
+
+### Decided
+- **AI autonomy band: not built (#18).** Approval inside a band just outside tolerance would equal a wider deterministic tolerance, rest on correlated agreement of one model, and narrow F01. The reasons and the deterministic alternative (raising `price_variance` tolerance) are recorded in `docs/design/implementation-plan.md` under "Decisions".
+
+### Documentation
+- The README notes that the required checks on `main` mirror the CI Python matrix and the docker job, so a PR that changes either must update branch protection (#16).
+- #15 (empty `OPENAI_*` settings treated as unset, root causes in model errors, fresh-seed `make smoke-live`) shipped in 1.0.0: the `v1.0.0` tag points at its merge. See the 1.0.0 entry below.
+
+### Release
+- Version 1.1.0.
+
+### Remaining known limitations
+
+Copied from `docs/design/implementation-plan.md`:
+
+- **R17, override source without an AI proposal.** When a case reaches review with no AI resolution (a high-value exact match, or a model outage before the Resolver answered), `human_review_node` and `finalize_node` compare the decision with a default APPROVE, so a human Reject or Request info is stored as `HUMAN_OVERRIDDEN`. The stored value is unchanged; the dashboard and the override metric count an override only when an AI resolution exists (`docs/audit-remediation.md`).
+- **No authentication.** The reviewer name comes from `P2P_REVIEWER_NAME`; there is no login or assignment model.
+- **One SQLite file, commands serialized.** Processing and reviews take a global file lock, so they run one at a time; the lock relies on `flock` and a local file system. Reads do not wait.
+- **REQUEST_INFO is terminal and keeps its PO quantity reservation (partly addressed by supersede).** From a held case's Cases detail, "Process corrected invoice" processes the supplier's correction under a new number as superseding the held case; the link releases the held reservation exactly once, in the same transaction as the correction's claim. A corrected invoice under the same number is still refused, and one processed without the link is still flagged Quantity exceeds order (and Quantity exceeds receipt) against the held case. There is no reopen workflow and no undo for a link.
+- **A held case with no correction keeps its reservation.** There is no release-hold action: if the supplier never sends a corrected invoice, the Request info case keeps its PO quantities.
+- **Same reviewer is flagged, not blocked.** Superseding a held case records who chose Request info and who linked the correction; when they are the same person both cases show "Same reviewer". Without authentication the name is self-declared, so segregation of duties is not enforced.
+- **Live model untested against the real API.** The OpenAI provider (timeouts, retries, 401/403, 429 including `insufficient_quota`, 5xx) is tested with an injected fake client only.
+- **Unreadable stored data.** A case whose state cannot be read shows "Needs recovery" with technical details, but its audit trail is not shown. An unreadable stored invoice on the same PO, or with the same invoice number, still blocks processing of a new invoice, because duplicate and reservation checks must read it.
+- **Identity lookup trusts normalized ids.** `claim_case` compares `invoice_id` directly (indexed). A legacy row written outside the `Invoice` model with a non-normalized id (lower case, surrounding spaces) would not be found.
+- **Resolver outage.** If the Resolver is unreachable, its fallback ESCALATE (confidence 0) appears as the recommendation chip; the reviewer note says the model was unavailable.
+- **Docker volumes from the old root image** need a one-time `chown` to uid 10001 (README).
+- **Python 3.15** is not in the CI matrix: uv 0.11.29 has no 3.15 build to test against.
+- **Streamlit-owned controls.** The tab-strip scroll arrows are 18 × 35 px (below the 24 px target size; tabs are also reachable by keyboard and swipe), and disabled buttons use Streamlit's low-contrast grey (inactive controls are exempt from WCAG contrast).
+- **Accepted design approximations.** Nav count instead of a badge, Streamlit's collapsing sidebar instead of a top row on narrow screens, coloured text instead of chips in the Cases table, a popover with a copyable link, a top bar that is not sticky; KPI trends stay hidden until enough history exists.
+- **Sticky decision panel (built after 1.0.0).** On the Review page the decision panel, or the recovery card in its place, is sticky whenever it sits beside the case detail: it stays in view while the case detail scrolls. A container query on the review workbench applies it when the workbench is at least 1016 px wide, the width at which queue, case detail and decision panel fit on one row (260 + 400 + 300 px and two 28 px gaps). That is a 1404 px window with the sidebar open and 1156 px with it collapsed. Where the panel wraps below the case detail nothing changes. On a short window the panel scrolls inside itself. Scoped CSS, no JavaScript.
+- **Sticky queue column: dropped.** The queue grows by about 167 px for each pending case (seven demo cases are about 1,220 px), so from five cases it is taller than a 900 px window. Pinned, its lower cards would be reachable only through a second inner scrollbar beside the decision panel's. The queue is also not needed while reading a case: after a decision the next case opens by itself.
+
 ## [1.0.0] - 2026-11-12
 
 First release: the dashboard rebuilt to the "P2P Dashboard Revised" design in eight phases, with the September 2026 audit controls (F01–F15) kept intact. The plan is in [`docs/design/implementation-plan.md`](docs/design/implementation-plan.md).
@@ -59,4 +100,5 @@ Copied from `docs/design/implementation-plan.md`:
 - **Accepted design approximations.** Nav count instead of a badge, Streamlit's collapsing sidebar instead of a top row on narrow screens, coloured text instead of chips in the Cases table, a popover with a copyable link, a top bar that is not sticky; KPI trends stay hidden until enough history exists.
 - **Not built from the Phase 7 plan:** sticky review queue and decision columns at ≥ 960 px (not in the Phase 7 scope that was approved).
 
+[1.1.0]: https://github.com/Mzoratto/autonomous-p2p-exception-handler/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Mzoratto/autonomous-p2p-exception-handler/releases/tag/v1.0.0
