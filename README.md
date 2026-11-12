@@ -174,6 +174,22 @@ The dashboard is available at <http://localhost:8501>. Compose binds the unauthe
   docker compose run --rm --user root p2p-handler chown -R 10001 /app/data/demo
   ```
 
+## Before going live
+
+1. **Smoke-test the live model on a copy of your data.**
+
+   ```bash
+   export OPENAI_API_KEY=...   # in the shell, not only in .env.local
+   P2P_DATABASE_URL=sqlite:///path/to/your.db make smoke-live
+   ```
+
+   The script copies the database to a temporary file and works only on the copy, whose path it prints. It runs the ten demo invoices through the real model one at a time, under new invoice ids so the model is really called. It then prints, per invoice: status, decision source, model, tokens, latency and any error.
+   - **Pass:** it exits 0. A case sent to a reviewer because the model was unavailable is reported, not a failure.
+   - **Fail:** it exits 1 on a rejected key or any unhandled exception.
+   - **The key** is never printed.
+2. **Check the browser.** Open the app in Safari 16+ or Firefox 110+ as well as Chrome; the case detail layout uses CSS container queries.
+3. **Hand old Docker volumes to the new user.** A volume created by an image from before 1.0.0, which ran as root, needs the one-time `chown` shown above.
+
 ## Test and lint
 
 ```bash

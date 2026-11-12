@@ -137,3 +137,25 @@ def test_mock_provider_records_its_calls():
     provider = MockModelProvider()
 
     assert getattr(provider, "last_call", None) == {"provider": "mock", "model": "mock"}
+
+
+def test_authentication_errors_never_carry_the_key(monkeypatch):
+    key = "sk-proj-LEAKCHECK-7Hx2"
+    monkeypatch.setenv("OPENAI_API_KEY", key)
+    provider = OpenAIModelProvider()
+    with_outcome(
+        provider,
+        openai.AuthenticationError(
+            f"Incorrect API key provided: sk-proj-****7Hx2. Sent: {key}",
+            response=httpx.Response(401, request=REQUEST),
+            body=None,
+        ),
+    )
+
+    with pytest.raises(ModelAuthenticationError) as raised:
+        provider.structured_response(Resolution, MESSAGES)
+
+    assert "Incorrect API key provided" in str(raised.value)
+    assert "7Hx2" not in str(raised.value)
+    # The original error, which holds the key, is not chained into logged tracebacks.
+    assert raised.value.__cause__ is None and raised.value.__suppress_context__

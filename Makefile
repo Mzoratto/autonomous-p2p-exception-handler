@@ -1,4 +1,4 @@
-.PHONY: setup seed run test coverage lint audit
+.PHONY: setup seed run test coverage lint audit smoke-live
 
 setup:
 	uv sync --frozen --extra dev --python 3.11
@@ -14,6 +14,10 @@ test:
 
 coverage:
 	.venv/bin/pytest --cov --cov-report=term
+
+# Live model check on a copy of P2P_DATABASE_URL; needs OPENAI_API_KEY in the environment.
+smoke-live:
+	.venv/bin/python scripts/smoke_live.py
 
 lint:
 	.venv/bin/ruff check .
