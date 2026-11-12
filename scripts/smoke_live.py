@@ -7,16 +7,17 @@ Usage:  OPENAI_API_KEY=... make smoke-live        (or: .venv/bin/python scripts/
 - Default: every scenario runs on its own new database, seeded exactly as the demo seed, so
   each one starts with untouched purchase orders and reservations. The result then tests the
   model, not collisions with earlier cases.
-- --from-db: copy the database at P2P_DATABASE_URL (default sqlite:///data/demo/p2p.db) and run
-  every scenario on that one copy instead. Existing cases keep their PO reservations, so
-  results can differ from the Expected column. Invoice ids get a "-SMOKE-<time>" suffix so the
-  model is really called (scenario 08 keeps DUP-001); --keep-ids turns that off.
+- --from-db: copy the database at P2P_DATABASE_URL (default sqlite:///data/demo/p2p.db; it must
+  exist) and run every scenario on that one copy instead. Existing cases keep their PO
+  reservations, so results can differ from the Expected column. Invoice ids get a
+  "-SMOKE-<time>" suffix so the model is really called (scenario 08 keeps DUP-001); --keep-ids
+  turns that off.
 - Prints, per invoice: the outcome the mock provider produces on a fresh seed (Expected), the
   live outcome, what routed it (policy rules, or "autonomous"), decision source, model, tokens,
-  latency and any error.
-- Exit 1 if any case hit an authentication error or an unhandled exception, or if no case made
-  a successful model call (the API was not reached). A case sent to a reviewer because the
-  model was unavailable is reported, not a failure. Exit 2 for missing or invalid settings.
+  latency and any error. Only model responses received during this run are counted.
+- Exit 1 if any case hit an authentication error or an unhandled exception, or if no model
+  response was recorded in this run. A case sent to a reviewer because the model was
+  unavailable is reported, not a failure. Exit 2 for missing or invalid settings.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -68,18 +70,14 @@ class RedactingFormatter(logging.Formatter):
         return redact_secret(super().format(record), self.secret)
 
 
-def copy_database(url: str, target: Path) -> tuple[Path, bool]:
-    """Back up the source database to `target`; the source is only ever opened read-only."""
-    source = Path(url.removeprefix("sqlite:///"))
-    exists = source.is_file()
-    if exists:
-        # The backup API gives a consistent copy, including pages still in the WAL file.
-        with (
-            sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True) as original,
-            sqlite3.connect(target) as copy,
-        ):
-            original.backup(copy)
-    return source, exists
+def copy_database(source: Path, target: Path) -> None:
+    """Back up `source` to `target`; the source is only ever opened read-only."""
+    # The backup API gives a consistent copy, including pages still in the WAL file.
+    with (
+        sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True) as original,
+        sqlite3.connect(target) as copy,
+    ):
+        original.backup(copy)
 
 
 def outcome(case: dict) -> str:
@@ -98,12 +96,16 @@ def routed_by(case: dict) -> str:
     return ", ".join(policy.get("triggered_rules") or []) or "—"
 
 
-def model_usage(case: dict) -> tuple[str, str, str, bool]:
-    """Models, total tokens and latency of the AI calls, and whether any call got a response."""
+def model_usage(case: dict, since: datetime) -> tuple[str, str, str, bool]:
+    """Models, tokens and latency of the AI calls made since `since`, and whether one answered.
+
+    Calls recorded earlier (a replayed or resumed case from the copied data) are not counted.
+    """
     calls = [
         event["data"]["model_call"]
         for event in case.get("audit") or []
         if isinstance(event["data"].get("model_call"), dict)
+        and datetime.fromisoformat(event["timestamp"]) >= since
     ]
     answered = [call for call in calls if call.get("response_id") or call.get("input_tokens")]
     if not answered:
@@ -121,6 +123,7 @@ def stored_status(app: CaseService, invoice_id: str) -> str:
 
 def run_invoice(app: CaseService, invoice, secret: str) -> tuple[Row, str | None]:
     """Process one invoice; return its row and, if it fails the smoke test, why."""
+    started = datetime.now(UTC)
     try:
         result = app.process_invoice(invoice)
     except ModelAuthenticationError as exc:
@@ -135,7 +138,7 @@ def run_invoice(app: CaseService, invoice, secret: str) -> tuple[Row, str | None
         ), "error"
     case = app.get_case(result["case_id"]) or {}
     state = case.get("state") or {}
-    model, tokens, latency, called = model_usage(case)
+    model, tokens, latency, called = model_usage(case, started)
     error = state.get("model_error") or case.get("last_error") or ""
     if result.get("is_replay"):
         error = "replay: this invoice is already in the data, so the model was not called"
@@ -191,7 +194,6 @@ def print_table(rows: list[Row]) -> None:
 
 
 def run(args: argparse.Namespace, settings: ModelSettings, secret: str) -> int:
-    workdir = Path(tempfile.mkdtemp(prefix="p2p-smoke-"))
     invoices = CaseService.demo_invoices()
     proxies = proxy_variables()
     if args.from_db:
@@ -201,10 +203,17 @@ def run(args: argparse.Namespace, settings: ModelSettings, secret: str) -> int:
                 "P2P_DATABASE_URL must be a sqlite:/// file path without options.", file=sys.stderr
             )
             return 2
+        source = Path(url.removeprefix("sqlite:///"))
+        if not source.is_file():
+            # Seeding a demo copy here would test the demo data, not the database asked for.
+            print(f"P2P_DATABASE_URL points to {source}, which does not exist.", file=sys.stderr)
+            return 2
+    workdir = Path(tempfile.mkdtemp(prefix="p2p-smoke-"))
+    if args.from_db:
         copy = workdir / "copy" / "p2p.db"
         copy.parent.mkdir()
-        source, existed = copy_database(url, copy)
-        print(f"Mode: copy of {source}" + ("" if existed else " (not found; demo data)"))
+        copy_database(source, copy)
+        print(f"Mode: copy of {source}")
         print(f"Databases: {copy.parent}")
     else:
         print("Mode: fresh demo seed for each scenario")
@@ -261,7 +270,9 @@ def run(args: argparse.Namespace, settings: ModelSettings, secret: str) -> int:
         print("FAIL: at least one case hit an authentication error or an unhandled exception.")
         return 1
     if not any(row.called for row in rows):
-        print("FAIL: no successful model call; the API was not reached.")
+        # A request may still have reached the service (a quota error, say); what is known
+        # is that no call of this run got a model response back.
+        print("FAIL: no successful model call; no model response was recorded.")
         return 1
     print(
         "OK: the model answered, and there were no authentication errors or unhandled exceptions."

@@ -192,10 +192,10 @@ The dashboard is available at <http://localhost:8501>. Compose binds the unauthe
 
    **Result:**
    - **Pass:** it exits 0. A case sent to a reviewer because the model was unavailable is reported, not a failure; so is a model that reaches a different outcome from the mock.
-   - **Fail:** it exits 1 on a rejected key, any unhandled exception, or when no case made a successful model call ("the API was not reached").
+   - **Fail:** it exits 1 on a rejected key, any unhandled exception, or when no model response was recorded in this run. Only responses received during this run count; a replayed case from your data does not.
    - **The key** is never printed.
 
-   **Your own data:** `P2P_DATABASE_URL=sqlite:///path/to/your.db make smoke-live ARGS=--from-db` runs all ten on a copy of that database instead, under new invoice ids. It warns that existing cases keep their PO reservations, so results there can differ from Expected.
+   **Your own data:** `P2P_DATABASE_URL=sqlite:///path/to/your.db make smoke-live ARGS=--from-db` runs all ten on a copy of that database instead, under new invoice ids; the database must exist. It warns that existing cases keep their PO reservations, so results there can differ from Expected.
 2. **Check the browser.** Open the app in Safari 16+ or Firefox 110+ as well as Chrome; the case detail layout uses CSS container queries.
 3. **Hand old Docker volumes to the new user.** A volume created by an image from before 1.0.0, which ran as root, needs the one-time `chown` shown above.
 

@@ -179,6 +179,36 @@ def test_from_db_works_on_a_copy_and_warns_about_existing_reservations(source, c
     assert fingerprint(source) == before
 
 
+def test_from_db_needs_the_requested_database_to_exist(live, monkeypatch, capsys):
+    missing = live / "missing" / "p2p.db"
+    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{missing}")
+
+    assert load_script().main(["--from-db"]) == 2
+
+    assert f"{missing}, which does not exist" in capsys.readouterr().err
+    assert FakeOpenAI.calls == 0
+
+
+def test_replayed_cases_do_not_count_as_model_calls_of_this_run(live, monkeypatch, capsys):
+    """With --keep-ids every case replays; responses recorded by an earlier run don't count."""
+    path = live / "live-data" / "p2p.db"
+    runtime = create_runtime(database_url=f"sqlite:///{path}", demo_mode=False)
+    service = CaseService(runtime)
+    for invoice in demo_invoices().values():
+        service.process_invoice(invoice)  # answered by the fake client, so responses are recorded
+    runtime.close()
+    runtime.repository.database.engine.dispose()
+    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{path}")
+    calls_before = FakeOpenAI.calls
+
+    assert load_script().main(["--from-db", "--keep-ids"]) == 1
+
+    out = capsys.readouterr().out
+    assert FakeOpenAI.calls == calls_before
+    assert "replay" in table(out)["INV-LARGE"]["Error"]
+    assert "FAIL: no successful model call" in out
+
+
 def test_base_url_host_and_proxy_names_are_shown_but_not_proxy_values(live, monkeypatch, capsys):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://proxy.example.com/v1")
     monkeypatch.setenv("HTTPS_PROXY", "http://user:pass@corp-proxy:3128")
@@ -206,7 +236,7 @@ def test_no_successful_model_call_fails_the_run(live, monkeypatch, capsys):
     assert load_script().main([]) == 1
 
     out = capsys.readouterr().out
-    assert "FAIL: no successful model call; the API was not reached." in out
+    assert "FAIL: no successful model call; no model response was recorded." in out
     assert "Model unavailable" in out
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -206,9 +207,18 @@ def _number(name: str, default: str, kind: type, minimum: float, unit: str) -> f
         value = kind(raw)
     except ValueError:
         value = None
-    if value is None or value < minimum:
+    # float() accepts "nan" and "inf"; neither is a usable timeout.
+    if value is None or not math.isfinite(value) or value < minimum:
         raise ModelConfigurationError(f"{name} must be {unit}", _SETUP_FIX)
     return value
+
+
+def _is_http_url(value: str) -> bool:
+    try:
+        parts = urlsplit(value)
+        return parts.scheme in {"http", "https"} and bool(parts.hostname)
+    except ValueError:  # e.g. an unmatched "[" in an IPv6 host
+        return False
 
 
 @dataclass(frozen=True)
@@ -236,15 +246,12 @@ class ModelSettings:
                 "or set DEMO_MODE=true to run on the built-in mock model.",
             )
         base_url = os.environ.get("OPENAI_BASE_URL", "").strip() or None
-        if base_url is not None:
-            parts = urlsplit(base_url)
-            if parts.scheme not in {"http", "https"} or not parts.hostname:
-                raise ModelConfigurationError(
-                    "OPENAI_BASE_URL is not a valid URL",
-                    "Set OPENAI_BASE_URL to an http(s) URL with a host, such as "
-                    "https://proxy.example.com/v1, or remove it to call OpenAI directly. "
-                    + _SETUP_FIX,
-                )
+        if base_url is not None and not _is_http_url(base_url):
+            raise ModelConfigurationError(
+                "OPENAI_BASE_URL is not a valid URL",
+                "Set OPENAI_BASE_URL to an http(s) URL with a host, such as "
+                "https://proxy.example.com/v1, or remove it to call OpenAI directly. " + _SETUP_FIX,
+            )
         return cls(
             api_key=api_key,
             model=os.environ.get("OPENAI_MODEL", "gpt-4.1-mini").strip(),

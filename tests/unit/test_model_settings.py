@@ -27,7 +27,9 @@ def test_valid_base_url_is_used(monkeypatch):
     assert OpenAIModelProvider().client.base_url.host == "proxy.example.com"
 
 
-@pytest.mark.parametrize("url", ["not a url", "ftp://example.com/v1", "https://", "example.com/v1"])
+@pytest.mark.parametrize(
+    "url", ["not a url", "ftp://example.com/v1", "https://", "example.com/v1", "https://[::1"]
+)
 def test_invalid_base_url_is_a_configuration_error(monkeypatch, url):
     monkeypatch.setenv("OPENAI_BASE_URL", url)
 
@@ -54,7 +56,13 @@ def test_blank_optional_settings_fall_back_to_their_defaults(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("name", "value"), [("OPENAI_TIMEOUT_SECONDS", "soon"), ("OPENAI_MAX_RETRIES", "-1")]
+    ("name", "value"),
+    [
+        ("OPENAI_TIMEOUT_SECONDS", "soon"),
+        ("OPENAI_TIMEOUT_SECONDS", "nan"),
+        ("OPENAI_TIMEOUT_SECONDS", "inf"),
+        ("OPENAI_MAX_RETRIES", "-1"),
+    ],
 )
 def test_invalid_numbers_are_configuration_errors(monkeypatch, name, value):
     monkeypatch.setenv(name, value)
