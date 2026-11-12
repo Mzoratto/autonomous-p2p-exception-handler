@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+import pytest
+
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import DecisionType, HumanReview
 from p2p.infrastructure.database import demo_invoices
@@ -75,3 +77,11 @@ def test_case_and_audit_timestamps_are_utc_aware(app):
     stamps = [case["updated_at"], *(event["timestamp"] for event in case["audit"])]
     assert len(stamps) > 1
     assert all(datetime.fromisoformat(value).utcoffset() == timedelta(0) for value in stamps)
+
+
+def test_binding_a_review_to_a_case_that_was_never_stored_is_a_lookup_error(app):
+    """`bind_review` creates the command row from the stored case, so it needs that case."""
+    review = {"action": "APPROVE", "reviewer": "Ana Reviewer", "comment": "ok"}
+
+    with pytest.raises(LookupError, match="^No persisted case exists for CASE-NEVER$"):
+        app.runtime.repository.bind_review("CASE-NEVER", review, "checkpoint-1")

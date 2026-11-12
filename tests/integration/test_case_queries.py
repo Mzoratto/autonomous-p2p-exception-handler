@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy import delete, event
 from sqlalchemy.exc import OperationalError
 from streamlit.testing.v1 import AppTest
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import DecisionType, HumanReview, Invoice
-from p2p.infrastructure.database import CaseRow, Database, demo_invoices
+from p2p.infrastructure.database import CASES, CaseRow, Database, demo_invoices
 from p2p.ui.viewmodels import display_status
 
 REPO = Path(__file__).parents[2]
@@ -450,3 +451,35 @@ def test_read_path_stays_fast_with_three_hundred_cases(app):
     assert (summary["total"], total, len(rows)) == (300, 300, 50)
     assert summary["counts"]["review"] == 20
     assert elapsed < 1.0
+
+
+def test_migration_records_a_row_that_vanishes_mid_backfill_as_a_lookup_error(tmp_path):
+    """The row is selected, then gone when loaded: the migration names that, then carries on."""
+    source = tmp_path / "source.db"
+    runtime = create_runtime(
+        database_url=f"sqlite:///{source}", demo_mode=True, checkpointer=InMemorySaver()
+    )
+    case_id = CaseService(runtime).process_invoice(demo_invoices()["01_exact_match"])["case_id"]
+    runtime.close()
+    legacy = tmp_path / "legacy.db"
+    legacy_copy(source, legacy, [case_id])
+    database = Database(f"sqlite:///{legacy}")
+    lost = []
+
+    @event.listens_for(database.session_factory, "do_orm_execute")
+    def lose_the_row_when_it_is_loaded(state):
+        loads_case_row = (
+            state.is_select and state.statement.column_descriptions[0]["type"] is CaseRow
+        )
+        if loads_case_row and not lost:
+            lost.append(case_id)
+            # Deleted inside the migration's own transaction; its rollback restores the row.
+            state.session.execute(delete(CASES).where(CASES.c.case_id == case_id))
+
+    database.create_all()
+
+    assert lost == [case_id]
+    with database.session_factory() as session:
+        row = session.get(CaseRow, case_id)
+        assert row.last_error == "Migration could not read stored state: LookupError"
+        assert row.created_at is not None
