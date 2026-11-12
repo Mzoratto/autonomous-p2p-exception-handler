@@ -473,6 +473,50 @@ def test_process_page_supersedes_the_held_case_after_a_note_and_a_confirmation(d
     assert "process_supersedes" not in at.session_state
 
 
+def test_correcting_a_held_case_after_an_earlier_run_starts_a_new_flow_with_the_link(database_url):
+    """The Cases button once reopened the earlier result; "Process another" then lost the link."""
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
+    at.switch_page(f"{PAGES}/process.py").run()
+    at.button(key="scenario_select_03").click().run()
+    at.button(key="process_run").click().run()
+    held_id = at.session_state["process_case_id"]
+    with_service(
+        database_url,
+        lambda app: app.review_case(
+            held_id,
+            HumanReview(
+                reviewer="Ana Reviewer",
+                action=DecisionType.REQUEST_INFO,
+                comment="Send the PO amendment",
+            ),
+        ),
+    )
+
+    # Same session, entering as "Process corrected invoice" does (cases.py: switch_to).
+    at.query_params["supersedes"] = held_id
+    at.switch_page(f"{PAGES}/process.py").run()
+
+    assert not at.exception
+    assert any(f"Correcting held case {held_id}" in message.value for message in at.info)
+    assert "process_paste" in keys(at.text_area)
+    assert "process_another" not in keys(at.button)
+
+    at.text_area(key="process_paste").set_value(corrected().model_dump_json())
+    at.button(key="process_validate").click().run()
+    assert at.selectbox(key="process_supersede_case").value == held_id
+    at.text_area(key="process_supersede_note").set_value("Corrected at the PO price").run()
+    at.button(key="process_run").click().run()
+    at.button(key="process_supersede_confirm").click().run()
+
+    assert not at.exception
+    new_id = at.session_state["process_case_id"]
+    new = with_service(database_url, lambda app: app.get_case(new_id))
+    held = with_service(database_url, lambda app: app.get_case(held_id))
+    assert held["superseded_by"] == new_id
+    kinds = {item["type"] for item in new["state"]["match_result"]["discrepancies"]}
+    assert not kinds & {"QUANTITY_EXCEEDS_ORDER", "QUANTITY_EXCEEDS_RECEIPT"}
+
+
 def test_cancel_closes_the_supersede_confirmation_without_a_link(database_url):
     held_id = with_service(database_url, hold)
     at = open_process(held_id)

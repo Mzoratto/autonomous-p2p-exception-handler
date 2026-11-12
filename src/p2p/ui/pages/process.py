@@ -347,7 +347,10 @@ def result_step() -> None:
 
 def render() -> None:
     requested = st.query_params.get("supersedes")
-    if requested:
+    if requested and requested != st.session_state.get("process_supersedes"):
+        # A new correction request starts its own flow instead of reopening an earlier result.
+        for key in STATE_KEYS:
+            st.session_state.pop(key, None)
         st.session_state["process_supersedes"] = requested
     step = st.session_state.get("process_step", 0)
     top_bar(["Process invoice"], "/process")
