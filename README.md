@@ -132,19 +132,30 @@ OPENAI_MODEL=gpt-4.1-mini
 
 The live adapter uses the same typed provider interface and Pydantic response schemas as demo mode.
 
-Optional live-mode settings:
-
-| Variable | Default | Effect |
-|---|---|---|
-| `OPENAI_TIMEOUT_SECONDS` | `30` | Per-request timeout |
-| `OPENAI_MAX_RETRIES` | `1` | SDK retries before a request counts as failed |
-| `OPENAI_BASE_URL` | unset | Alternative OpenAI-compatible endpoint |
+The timeout, retry and endpoint settings are listed under [Environment variables](#environment-variables).
 
 Requests are sent with `store=False`. Each AI audit event records the model, response id, token counts and latency of the call.
 
 When the model service cannot be reached (timeout, connection error, rate limit, server error, or an exhausted quota), the workflow stops asking the model, records the failure and sends the case to a reviewer; the reviewer sees "Model unavailable" and the reason. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
 
 Never commit a real API key. `.env.local` is ignored by Git.
+
+### Environment variables
+
+Read from the process environment, then `.env.local`, then `.env` (an existing variable is never overridden by a file).
+
+| Variable | Default | Effect |
+|---|---|---|
+| `DEMO_MODE` | `true` | `true` runs on the deterministic mock model; `false` calls OpenAI |
+| `OPENAI_API_KEY` | unset | Required when `DEMO_MODE=false`; without it the dashboard shows the setup screen |
+| `OPENAI_MODEL` | `gpt-4.1-mini` | Model used by the Investigator, Resolver and Critic |
+| `OPENAI_BASE_URL` | unset | Alternative OpenAI-compatible endpoint |
+| `OPENAI_TIMEOUT_SECONDS` | `30` | Per-request timeout |
+| `OPENAI_MAX_RETRIES` | `1` | SDK retries before a request counts as failed (an outage) |
+| `P2P_DATABASE_URL` | `sqlite:///data/demo/p2p.db` | SQLite file for cases, audit events and checkpoints; must be a `sqlite:///` file path without query options |
+| `P2P_RULES_PATH` | `config/business_rules.yaml` in the project | Business rules file |
+| `P2P_REVIEWER_NAME` | `Demo Reviewer` | Name that signs human reviews; its initials appear in the top bar |
+| `P2P_LOG_LEVEL` | `INFO` | Log level for the `p2p` loggers (standard error) |
 
 ## Run with Docker
 

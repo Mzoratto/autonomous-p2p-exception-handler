@@ -73,16 +73,31 @@ Running all ten in order in one database: still 3 completed and 7 pending; 04 be
 4. Build screenshots: run the app on a scratch database and a free port (8501 may be in use), `P2P_DATABASE_URL=sqlite:////tmp/p2p-verify/p2p.db .venv/bin/streamlit run app.py --server.port 8502 --server.headless true`; capture with the session browser tool at widths 1440, 900, 390 as webp. Images never go into `main` or a phase branch. They are committed to the orphan branch `screenshots` through a temporary worktree: `git fetch origin screenshots && git worktree add -B screenshots /tmp/p2p-screenshots origin/screenshots`, save to `/tmp/p2p-screenshots/docs/design/screenshots/phase-<n>/<screen>-<width>.webp`, `git -C /tmp/p2p-screenshots add docs && git -C /tmp/p2p-screenshots commit -m "Add phase <n> screenshots" && git -C /tmp/p2p-screenshots push origin screenshots`, then `git worktree remove /tmp/p2p-screenshots`. PR bodies link each image as `https://github.com/Mzoratto/autonomous-p2p-exception-handler/blob/screenshots/<path>?raw=true`, next to the matching `docs/design/reference/<screen>-<width>.webp` on the same branch.
 5. Rules for every phase: `tests/integration/test_audit_controls.py` is never edited; the UI shows domain results and never decides pass/fail, tolerance or threshold itself (formatting and display subtraction are allowed); do not open or edit `.env`, `.env.local` or `.env.example`.
 
-| Phase | Branch | Builds |
-|---|---|---|
-| 0 | `chore/phase-0-prep` | Design files and this plan on `main`; reference images on the `screenshots` branch |
-| 1 | `ui/phase-1-tokens-fixes` | Tokens, fonts, bug fixes B1, B3, B4, B6, B7, B8 |
-| 2 | `ui/phase-2-shell` | Module split, `st.navigation`, top bar, URLs, About |
-| 3 | `feat/phase-3-case-detail` | Duplicate routing, `PolicyCheck`, case detail with four tabs |
-| 4 | `feat/phase-4-review-process` | Review workbench, Process flow |
-| 5 | `feat/phase-5-data-overview-cases` | Case columns, query API, Overview, Cases |
-| 6 | `fix/phase-6-backend` | Non-blocking reads, OpenAI hardening, logging |
-| 7 | `chore/phase-7-polish` | Responsive pass, Docker, CI, test gaps |
+| Phase | Branch | Builds | Status |
+|---|---|---|---|
+| 0 | `chore/phase-0-prep` | Design files and this plan on `main`; reference images on the `screenshots` branch | Done, #2 |
+| 1 | `ui/phase-1-tokens-fixes` | Tokens, fonts, bug fixes B1, B3, B4, B6, B7, B8 | Done, #4 (dependency chore #3 first) |
+| 2 | `ui/phase-2-shell` | Module split, `st.navigation`, top bar, URLs, About | Done, #5 |
+| 3 | `feat/phase-3-case-detail` | Duplicate routing, `PolicyCheck`, case detail with four tabs | Done, #6 |
+| 4 | `feat/phase-4-review-process` | Review workbench, Process flow | Done, #7 |
+| 5 | `feat/phase-5-data-overview-cases` | Case columns, query API, Overview, Cases | Done, #8 (follow-ups #9 Streamlit floor, #10 one-click recovery and migration resilience) |
+| 6 | `fix/phase-6-backend` | Non-blocking reads, OpenAI hardening, logging | Done, #11 |
+| 7 | `feat/phase-7a-ops`, `feat/phase-7b-responsive` | Docker, CI matrix, coverage, two-process test (7A); responsive and accessibility pass, docs (7B) | Done, #12 (7A) and the 7B PR |
+
+### Remaining known limitations (after Phase 7)
+
+- **R17, override source without an AI proposal.** When a case reaches review with no AI resolution (a high-value exact match, or a model outage before the Resolver answered), `human_review_node` and `finalize_node` compare the decision with a default APPROVE, so a human Reject or Request info is stored as `HUMAN_OVERRIDDEN`. The stored value is unchanged; the dashboard and the override metric count an override only when an AI resolution exists (`docs/audit-remediation.md`).
+- **No authentication.** The reviewer name comes from `P2P_REVIEWER_NAME`; there is no login or assignment model.
+- **One SQLite file, commands serialized.** Processing and reviews take a global file lock, so they run one at a time; the lock relies on `flock` and a local file system. Reads do not wait.
+- **Live model untested against the real API.** The OpenAI provider (timeouts, retries, 401/403, 429 including `insufficient_quota`, 5xx) is tested with an injected fake client only.
+- **Unreadable stored data.** A case whose state cannot be read shows "Needs recovery" with technical details, but its audit trail is not shown. An unreadable stored invoice on the same PO, or with the same invoice number, still blocks processing of a new invoice, because duplicate and reservation checks must read it.
+- **Identity lookup trusts normalized ids.** `claim_case` compares `invoice_id` directly (indexed). A legacy row written outside the `Invoice` model with a non-normalized id (lower case, surrounding spaces) would not be found.
+- **Resolver outage.** If the Resolver is unreachable, its fallback ESCALATE (confidence 0) appears as the recommendation chip; the reviewer note says the model was unavailable.
+- **Docker volumes from the old root image** need a one-time `chown` to uid 10001 (README).
+- **Python 3.15** is not in the CI matrix: uv 0.11.29 has no 3.15 build to test against.
+- **Streamlit-owned controls.** The tab-strip scroll arrows are 18 × 35 px (below the 24 px target size; tabs are also reachable by keyboard and swipe), and disabled buttons use Streamlit's low-contrast grey (inactive controls are exempt from WCAG contrast).
+- **Accepted design approximations.** Nav count instead of a badge, Streamlit's collapsing sidebar instead of a top row on narrow screens, coloured text instead of chips in the Cases table, a popover with a copyable link, a top bar that is not sticky; KPI trends stay hidden until enough history exists.
+- **Not built from the Phase 7 plan:** sticky review queue and decision columns at ≥ 960 px (not in the Phase 7 scope that was approved).
 
 ## Shared contracts (used by several phases)
 

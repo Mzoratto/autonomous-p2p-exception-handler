@@ -247,6 +247,8 @@ def waiting_chart(summary: dict) -> None:
                 titleFont="IBM Plex Sans",
                 labelColor="#475264",
                 titleColor="#5b6576",
+                labelFontSize=12,
+                titleFontSize=12,
             )
         )
         st.altair_chart(chart, width="stretch")

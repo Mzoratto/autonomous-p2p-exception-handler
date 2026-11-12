@@ -370,13 +370,12 @@ class SqliteRepository:
             if command and command.invoice_payload != payload:
                 raise ValueError("Case ID is permanently bound to different invoice content")
             # Include pre-migration cases; never silently combine legacy duplicates.
-            # Only rows that can share this case or invoice identity are read.
+            # Only rows that can share this case or invoice identity are read. Stored
+            # invoice ids come from a validated Invoice, which already strips and
+            # upper-cases them, so a plain comparison is exact and uses ix_cases_invoice_id.
             rows = session.execute(
                 select(CaseRow.case_id, CaseRow.invoice_payload).where(
-                    or_(
-                        CaseRow.case_id == case_id,
-                        func.upper(func.trim(CaseRow.invoice_id)) == invoice.invoice_id,
-                    )
+                    or_(CaseRow.case_id == case_id, CaseRow.invoice_id == invoice.invoice_id)
                 )
             ).all()
             for row_case_id, invoice_payload in rows:

@@ -1,6 +1,7 @@
 [theme]
 base = "light"
-primaryColor = "#2f6fed"
+# The design's link blue: #2f6fed as text was 4.09:1 on the page, below WCAG AA (4.5:1).
+primaryColor = "#1d4fc4"
 backgroundColor = "#f1f3f6"
 secondaryBackgroundColor = "#ffffff"
 textColor = "#131a26"
