@@ -208,24 +208,26 @@ class OpenAIModelProvider:
                 text_format=schema,
                 store=False,
             )
+        # Every mapped error is raised "from None": the original exception may echo the key,
+        # and a chained cause would print it in logged tracebacks. The new message is redacted
+        # and names the original error type.
         except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
             # A rejected key, or one without access to the model, is a configuration fault;
-            # routing cases to review would hide it. OpenAI echoes part of the key in the
-            # message, so the key is redacted and the original error is not chained.
+            # routing cases to review would hide it.
             raise ModelAuthenticationError(redact_secret(str(exc), self._api_key)) from None
         except openai.RateLimitError as exc:
             # An exhausted quota is an outage like any other: the case goes to a reviewer.
             # Its reason is named, since waiting will not clear it.
             if exc.code == "insufficient_quota":
-                raise ModelUnavailableError("OpenAI quota exhausted (insufficient_quota)") from exc
+                raise ModelUnavailableError("OpenAI quota exhausted (insufficient_quota)") from None
             raise ModelUnavailableError(
                 f"{type(exc).__name__}: {redact_secret(str(exc), self._api_key)}"
-            ) from exc
+            ) from None
         except (openai.APIConnectionError, openai.InternalServerError) as exc:
             # APIConnectionError includes timeouts.
             raise ModelUnavailableError(
                 f"{type(exc).__name__}: {redact_secret(str(exc), self._api_key)}"
-            ) from exc
+            ) from None
         usage = getattr(response, "usage", None)
         self.last_call = {
             "provider": "openai",

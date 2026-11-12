@@ -139,20 +139,39 @@ def test_mock_provider_records_its_calls():
     assert getattr(provider, "last_call", None) == {"provider": "mock", "model": "mock"}
 
 
-def test_authentication_errors_never_carry_the_key(monkeypatch):
-    key = "sk-proj-LEAKCHECK-7Hx2"
-    monkeypatch.setenv("OPENAI_API_KEY", key)
-    provider = OpenAIModelProvider()
-    with_outcome(
-        provider,
-        openai.AuthenticationError(
-            f"Incorrect API key provided: sk-proj-****7Hx2. Sent: {key}",
-            response=httpx.Response(401, request=REQUEST),
-            body=None,
-        ),
-    )
+KEY_ECHO = "Incorrect API key provided: sk-proj-****7Hx2. Sent: sk-proj-LEAKCHECK-7Hx2"
 
-    with pytest.raises(ModelAuthenticationError) as raised:
+
+@pytest.mark.parametrize(
+    ("error", "raised_as"),
+    [
+        (
+            openai.AuthenticationError(
+                KEY_ECHO, response=httpx.Response(401, request=REQUEST), body=None
+            ),
+            ModelAuthenticationError,
+        ),
+        (
+            openai.RateLimitError(
+                KEY_ECHO, response=httpx.Response(429, request=REQUEST), body=None
+            ),
+            ModelUnavailableError,
+        ),
+        (
+            openai.InternalServerError(
+                KEY_ECHO, response=httpx.Response(503, request=REQUEST), body=None
+            ),
+            ModelUnavailableError,
+        ),
+        (openai.APIConnectionError(message=KEY_ECHO, request=REQUEST), ModelUnavailableError),
+    ],
+)
+def test_model_errors_never_carry_the_key(monkeypatch, error, raised_as):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-LEAKCHECK-7Hx2")
+    provider = OpenAIModelProvider()
+    with_outcome(provider, error)
+
+    with pytest.raises(raised_as) as raised:
         provider.structured_response(Resolution, MESSAGES)
 
     assert "Incorrect API key provided" in str(raised.value)

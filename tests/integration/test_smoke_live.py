@@ -71,6 +71,7 @@ def source(tmp_path, monkeypatch) -> Path:
     runtime.repository.database.engine.dispose()
     monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{path}")
     monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4.1-mini")  # the table shows the configured model
     monkeypatch.setattr(providers, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(FakeOpenAI, "mode", "ok")
     monkeypatch.setattr(FakeOpenAI, "calls", 0)
