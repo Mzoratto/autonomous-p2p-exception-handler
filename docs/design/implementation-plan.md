@@ -89,6 +89,7 @@ Running all ten in order in one database: still 3 completed and 7 pending; 04 be
 - **R17, override source without an AI proposal.** When a case reaches review with no AI resolution (a high-value exact match, or a model outage before the Resolver answered), `human_review_node` and `finalize_node` compare the decision with a default APPROVE, so a human Reject or Request info is stored as `HUMAN_OVERRIDDEN`. The stored value is unchanged; the dashboard and the override metric count an override only when an AI resolution exists (`docs/audit-remediation.md`).
 - **No authentication.** The reviewer name comes from `P2P_REVIEWER_NAME`; there is no login or assignment model.
 - **One SQLite file, commands serialized.** Processing and reviews take a global file lock, so they run one at a time; the lock relies on `flock` and a local file system. Reads do not wait.
+- **REQUEST_INFO is terminal and keeps its PO quantity reservation.** A corrected invoice under the same number is refused; under a new number it is flagged Quantity exceeds order (and Quantity exceeds receipt) against the held case. There is no supersede or reopen workflow.
 - **Live model untested against the real API.** The OpenAI provider (timeouts, retries, 401/403, 429 including `insufficient_quota`, 5xx) is tested with an injected fake client only.
 - **Unreadable stored data.** A case whose state cannot be read shows "Needs recovery" with technical details, but its audit trail is not shown. An unreadable stored invoice on the same PO, or with the same invoice number, still blocks processing of a new invoice, because duplicate and reservation checks must read it.
 - **Identity lookup trusts normalized ids.** `claim_case` compares `invoice_id` directly (indexed). A legacy row written outside the `Invoice` model with a non-normalized id (lower case, surrounding spaces) would not be found.
@@ -99,6 +100,16 @@ Running all ten in order in one database: still 3 completed and 7 pending; 04 be
 - **Accepted design approximations.** Nav count instead of a badge, Streamlit's collapsing sidebar instead of a top row on narrow screens, coloured text instead of chips in the Cases table, a popover with a copyable link, a top bar that is not sticky; KPI trends stay hidden until enough history exists.
 - **Sticky decision panel (built after 1.0.0).** On the Review page the decision panel, or the recovery card in its place, is sticky whenever it sits beside the case detail: it stays in view while the case detail scrolls. A container query on the review workbench applies it when the workbench is at least 1016 px wide, the width at which queue, case detail and decision panel fit on one row (260 + 400 + 300 px and two 28 px gaps). That is a 1404 px window with the sidebar open and 1156 px with it collapsed. Where the panel wraps below the case detail nothing changes. On a short window the panel scrolls inside itself. Scoped CSS, no JavaScript.
 - **Sticky queue column: dropped.** The queue grows by about 167 px for each pending case (seven demo cases are about 1,220 px), so from five cases it is taller than a 900 px window. Pinned, its lower cards would be reachable only through a second inner scrollbar beside the decision panel's. The queue is also not needed while reading a case: after a decision the next case opens by itself.
+
+### Decisions
+
+- **AI autonomy band: not built (2026-11-12).** The proposal let an AI recommendation complete a price variance just outside tolerance (up to 5 % and 50.00 per line). Not built because:
+  - Approval inside the band equals a wider deterministic tolerance: the model sees only the PO, receipt and invoice figures the matcher already compared.
+  - Investigator, Resolver and Critic are one model, so their agreement is correlated, not independent verification.
+  - F01 (autonomous approval only for matched results with non-material price discrepancies) would be narrowed.
+  - Autonomous Request info alone saves one reviewer click, because REQUEST_INFO is terminal: contacting the supplier and the corrected invoice stay with people.
+
+  If the business accepts that exposure, raising `price_variance.auto_approve_percent` and `auto_approve_absolute` in `config/business_rules.yaml` is the deterministic alternative.
 
 ## Shared contracts (used by several phases)
 
