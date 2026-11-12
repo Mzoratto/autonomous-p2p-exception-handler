@@ -73,9 +73,36 @@ def test_case_detail_reports_a_case_that_lost_its_checkpoint(database_url):
     assert any(f"{broken} needs recovery" in error.value for error in at.error)
 
 
+EMPTY_STATE_ACTIONS = {
+    "overview": {
+        "overview_run_all_top",
+        "overview_process_top",
+        "overview_run_all_empty",
+        "overview_process_empty",
+    },
+    "process": {"process_validate", *(f"scenario_select_{n:02d}" for n in range(1, 11))},
+    "review": {"review_empty_cases", "review_empty_process"},
+    "cases": {"cases_view", "cases_search"},
+    "about": set(),
+}
+
+
+def widget_keys(at: AppTest) -> set[str]:
+    return {
+        widget.key
+        for widgets in (at.button, at.text_input, at.get("button_group"))
+        for widget in widgets
+        if getattr(widget, "key", None)
+    }
+
+
 @pytest.mark.parametrize("page", PAGES)
-def test_page_renders_on_empty_database(database_url, page):
-    assert not open_page(page).exception
+def test_empty_database_pages_offer_their_actions(database_url, page):
+    """Each empty state still offers a way forward, so no action is lost to an empty layout."""
+    at = open_page(page)
+
+    assert not at.exception
+    assert EMPTY_STATE_ACTIONS[page] <= widget_keys(at)
 
 
 @pytest.mark.parametrize("page", PAGES)

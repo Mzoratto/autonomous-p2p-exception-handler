@@ -102,7 +102,7 @@ def match_html(view: MatchView) -> str:
         grids.append(
             f"""
             <h3 class="p2p-subhead">{h(line.title)}</h3>
-            <div class="p2p-table-wrap">
+            <div class="p2p-table-wrap" tabindex="0" role="region" aria-label="{h(line.title)}: invoice, PO and receipt compared">
               <table class="p2p-match-grid">
                 <thead><tr><th></th><th class="p2p-num">Invoice</th><th class="p2p-num">PO</th><th class="p2p-num">Receipt</th><th>Variance</th><th>Tolerance</th></tr></thead>
                 <tbody>{rows}</tbody>
