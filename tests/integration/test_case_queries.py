@@ -274,6 +274,7 @@ def test_query_views_match_status_and_outcome(app, five):
         "approved": 1,
         "rejected": 1,
         "request_info": 0,
+        "superseded": 0,
     }
 
 
@@ -333,6 +334,7 @@ def test_summary_counts_values_rates_and_overrides(app):
         "approved": 1,
         "rejected": 1,
         "request_info": 0,
+        "superseded": 0,
         "processing": 1,
     }
     assert summary["awaiting"]["value_by_currency"] == {"EUR": "62200.00"}

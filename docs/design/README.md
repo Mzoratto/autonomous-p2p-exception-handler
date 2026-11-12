@@ -29,9 +29,9 @@ The sample `rules()` and `mx()` functions in the script recompute tolerances in 
 |Screen|URL path|Query params|
 |---|---|---|
 |Overview|`/`| |
-|Process invoice|`/process`| |
+|Process invoice|`/process`|`supersedes=<case_id>` preselects the held case a corrected invoice replaces|
 |Review queue|`/review`|`case=<case_id>`|
-|Cases|`/cases`|`case=<case_id>`, `status=<review, approved, rejected, request_info>` (absent means all)|
+|Cases|`/cases`|`case=<case_id>`, `status=<review, approved, rejected, request_info, superseded>` (absent means all)|
 |Case detail|`/cases?case=<case_id>`| |
 |About|`/about`| |
 
@@ -112,7 +112,7 @@ From the `EVT` map in the design script (line 757).
 |1|`last_error` set and status not COMPLETED (from Phase 5)|`recovery`|Needs recovery|
 |2|`busy` true (from Phase 6)|`processing`|Processing|
 |3|status PENDING_REVIEW|`review`|Awaiting review|
-|4|status COMPLETED|`approved` / `rejected` / `request_info` / `escalated`|`<outcome label> · Autonomous` when `outcome.source == "AUTONOMOUS"`, else `<outcome label> · Human`|
+|4|status COMPLETED|`approved` / `rejected` / `request_info` / `escalated`|"Request info · Superseded" when `superseded_by` is set; else `<outcome label> · Autonomous` when `outcome.source == "AUTONOMOUS"`, else `<outcome label> · Human`|
 |5|anything else|`recovery`|Needs recovery|
 
 ## Real scenario outcomes

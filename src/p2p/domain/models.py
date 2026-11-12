@@ -241,6 +241,15 @@ class CaseOutcome(BaseModel):
     completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class SupersedeRequest(BaseModel):
+    """A reviewer links a corrected invoice to a held (REQUEST_INFO) case it replaces."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+    held_case_id: str = Field(min_length=1)
+    reviewer: str = Field(min_length=1)
+    note: str = Field(min_length=3)
+
+
 class AuditEventType(StrEnum):
     CASE_CREATED = "CASE_CREATED"
     INVOICE_VALIDATED = "INVOICE_VALIDATED"
@@ -256,6 +265,8 @@ class AuditEventType(StrEnum):
     HUMAN_REVIEW_REQUESTED = "HUMAN_REVIEW_REQUESTED"
     HUMAN_DECISION_RECEIVED = "HUMAN_DECISION_RECEIVED"
     CASE_COMPLETED = "CASE_COMPLETED"
+    CASE_SUPERSEDED = "CASE_SUPERSEDED"
+    SUPERSEDES_CASE = "SUPERSEDES_CASE"
 
 
 class AuditEvent(BaseModel):

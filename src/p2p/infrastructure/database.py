@@ -43,8 +43,10 @@ from p2p.domain.models import (
     InvoiceSummary,
     PurchaseOrder,
     PurchaseOrderLine,
+    SupersedeRequest,
     Supplier,
 )
+from p2p.ports import SupersedeRefusedError
 
 
 def _utcnow() -> datetime:
@@ -118,6 +120,10 @@ class CaseRow(Base):
     review_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Written only by the supersede command (claim_case), never by saves, reconciles,
+    # error records or the migration backfill.
+    superseded_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 PROJECTED_COLUMNS = (
@@ -158,7 +164,9 @@ CASE_VIEWS = {
     "review": (CaseRow.status == "PENDING_REVIEW",),
     "approved": _completed_with("APPROVE"),
     "rejected": _completed_with("REJECT"),
-    "request_info": _completed_with("REQUEST_INFO"),
+    # A superseded case keeps its REQUEST_INFO outcome but is listed under "superseded".
+    "request_info": (*_completed_with("REQUEST_INFO"), CaseRow.superseded_by.is_(None)),
+    "superseded": (CaseRow.superseded_by.is_not(None),),
 }
 CASE_SORTS = {
     "case": CaseRow.case_id,
@@ -360,7 +368,16 @@ class SqliteRepository:
                 )
             )
 
-    def claim_case(self, case_id: str, invoice: Invoice) -> tuple[str, bool]:
+    def claim_case(
+        self, case_id: str, invoice: Invoice, supersede: SupersedeRequest | None = None
+    ) -> tuple[str, bool]:
+        """Claim the invoice's identity for a case; with `supersede`, link it to a held case.
+
+        The link, the held case's release and both audit events commit in the same
+        transaction as the claim, so a correction is checked without the held reservation
+        and the release happens exactly once. A replay of an already linked correction
+        returns its case.
+        """
         payload = to_json(invoice)
         identity = to_json(
             [invoice.supplier_id.strip().upper(), invoice.invoice_id.strip().upper()]
@@ -389,6 +406,8 @@ class SqliteRepository:
                         raise ValueError(
                             "Invoice or case identity already exists with different content"
                         )
+                    if supersede is not None:
+                        self._check_replayed_link(session, row_case_id, invoice, supersede)
                     return row_case_id, False
             session.add(CaseCommandRow(case_id=case_id, identity=identity, invoice_payload=payload))
             session.add(
@@ -402,8 +421,114 @@ class SqliteRepository:
                     **project(json.loads(payload), {}),
                 )
             )
+            if supersede is not None:
+                self._link(session, case_id, invoice, supersede)
             session.commit()
         return case_id, True
+
+    @staticmethod
+    def _check_replayed_link(
+        session, case_id: str, invoice: Invoice, supersede: SupersedeRequest
+    ) -> None:
+        if case_id == supersede.held_case_id:
+            raise SupersedeRefusedError(
+                f"{invoice.invoice_id} is the held invoice itself. "
+                "A correction needs its own invoice number."
+            )
+        linked = session.get(AuditEventRow, f"{case_id}:{AuditEventType.SUPERSEDES_CASE.value}")
+        if not linked or json.loads(linked.data_payload)["held_case_id"] != supersede.held_case_id:
+            raise SupersedeRefusedError(
+                f"{invoice.invoice_id} was already processed as {case_id} without this link."
+            )
+
+    @staticmethod
+    def _link(session, case_id: str, invoice: Invoice, supersede: SupersedeRequest) -> None:
+        held_id = supersede.held_case_id
+        held = session.get(CaseRow, held_id)
+        if held is None:
+            raise SupersedeRefusedError(f"No case {held_id} exists.")
+        if held.status != "COMPLETED" or held.outcome_action != "REQUEST_INFO":
+            raise SupersedeRefusedError(
+                f"Only a completed Request info case can be superseded; {held_id} is not one."
+            )
+        if held.superseded_by:
+            raise SupersedeRefusedError(
+                f"{held_id} was already superseded by {held.superseded_by}."
+            )
+        if (
+            invoice.po_number is None
+            or held.supplier_id != invoice.supplier_id
+            or held.po_number != invoice.po_number
+        ):
+            raise SupersedeRefusedError(
+                f"A correction must have the same supplier and purchase order as {held_id}."
+            )
+        held_invoice = Invoice.model_validate_json(held.invoice_payload)
+        held_reviewer = (json.loads(held.state_payload).get("human_review") or {}).get("reviewer")
+        now = _utcnow()
+        # Conditional on the same facts, so two linkers can never both release one case.
+        released = session.execute(
+            update(CaseRow.__table__)
+            .where(
+                CaseRow.__table__.c.case_id == held_id,
+                CaseRow.__table__.c.superseded_by.is_(None),
+                CaseRow.__table__.c.status == "COMPLETED",
+                CaseRow.__table__.c.outcome_action == "REQUEST_INFO",
+            )
+            .values(superseded_by=case_id, superseded_at=now, updated_at=now)
+        )
+        if released.rowcount != 1:
+            raise SupersedeRefusedError(f"{held_id} was already superseded.")
+        shared = {
+            "reviewer": supersede.reviewer,
+            "held_reviewer": held_reviewer,
+            "same_reviewer": bool(
+                held_reviewer and held_reviewer.strip().casefold() == supersede.reviewer.casefold()
+            ),
+            "note": supersede.note,
+            "po_number": invoice.po_number,
+            "released": {line.line_id: str(line.quantity) for line in held_invoice.line_items},
+        }
+        for owner, event_type, data in (
+            (
+                held_id,
+                AuditEventType.CASE_SUPERSEDED,
+                {"superseded_by": case_id, "new_invoice_id": invoice.invoice_id},
+            ),
+            (
+                case_id,
+                AuditEventType.SUPERSEDES_CASE,
+                {"held_case_id": held_id, "held_invoice_id": held_invoice.invoice_id},
+            ),
+        ):
+            session.add(
+                AuditEventRow(
+                    event_id=f"{owner}:{event_type.value}",
+                    case_id=owner,
+                    timestamp=now,
+                    event_type=event_type.value,
+                    actor="human_reviewer",
+                    data_payload=to_json({**data, **shared}),
+                )
+            )
+
+    def held_cases(self, supplier_id: str, po_number: str) -> list[dict]:
+        """Completed Request info cases on this supplier and PO that nothing has superseded."""
+        with self.database.session_factory() as session:
+            rows = session.scalars(
+                select(CaseRow)
+                .options(
+                    defer(CaseRow.invoice_payload, raiseload=True),
+                    defer(CaseRow.state_payload, raiseload=True),
+                )
+                .where(
+                    *CASE_VIEWS["request_info"],
+                    CaseRow.supplier_id == supplier_id,
+                    CaseRow.po_number == po_number,
+                )
+                .order_by(CaseRow.completed_at, CaseRow.case_id)
+            )
+            return [self._row_dict(row) for row in rows]
 
     def bind_review(self, case_id: str, review: dict, checkpoint_id: str) -> dict:
         with self.database.session_factory() as session:
@@ -455,6 +580,8 @@ class SqliteRepository:
                     CaseRow.case_id != exclude_case_id,
                     or_(po_match, CaseRow.po_number.is_(None)),
                     or_(CaseRow.outcome_action.is_(None), CaseRow.outcome_action != "REJECT"),
+                    # A superseded case released its quantities to the correction.
+                    CaseRow.superseded_by.is_(None),
                 )
             ).all()
         quantities: dict[str, Decimal] = {}
@@ -462,7 +589,8 @@ class SqliteRepository:
             invoice = json.loads(invoice_payload)
             if invoice.get("po_number") != po_number or outcome_action == "REJECT":
                 continue
-            # Pending, interrupted, failed, and REQUEST_INFO cases retain reservations.
+            # Pending, interrupted, failed, and REQUEST_INFO cases retain reservations until
+            # rejected or superseded.
             for line in invoice["line_items"]:
                 quantities[line["line_id"]] = quantities.get(
                     line["line_id"], Decimal("0")
@@ -694,6 +822,7 @@ class SqliteRepository:
             "outcome_action": row.outcome_action,
             "outcome_source": row.outcome_source,
             "last_error": row.last_error,
+            "superseded_by": row.superseded_by,
             "created_at": _iso(row.created_at),
             "review_requested_at": _iso(row.review_requested_at),
             "completed_at": _iso(row.completed_at),
@@ -710,6 +839,8 @@ class SqliteRepository:
             "state": json.loads(row.state_payload),
             "updated_at": row.updated_at.replace(tzinfo=UTC).isoformat(),
             "last_error": row.last_error,
+            "superseded_by": row.superseded_by,
+            "superseded_at": _iso(row.superseded_at),
         }
 
     def record(self, event: AuditEvent) -> None:

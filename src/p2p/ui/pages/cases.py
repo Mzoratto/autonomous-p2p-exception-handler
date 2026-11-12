@@ -8,7 +8,15 @@ from p2p.ui.components.case_detail import render_case_detail
 from p2p.ui.components.chips import h, render_html, status_pill
 from p2p.ui.components.shell import page_header, show_failure, switch_to, top_bar
 from p2p.ui.runtime import service
-from p2p.ui.viewmodels import display_status, label_exception, outcome_view, parse_timestamp
+from p2p.ui.viewmodels import (
+    SupersedeLink,
+    can_be_superseded,
+    display_status,
+    label_exception,
+    outcome_view,
+    parse_timestamp,
+    supersede_link,
+)
 
 VIEWS = {
     "all": "All",
@@ -16,6 +24,7 @@ VIEWS = {
     "approved": "Approved",
     "rejected": "Rejected",
     "request_info": "Request info",
+    "superseded": "Superseded",
 }
 PAGE_SIZE = 50
 SEVERITY_FG = {
@@ -168,6 +177,34 @@ def outcome_panel(case: dict) -> None:
     )
 
 
+def open_case(case_id: str) -> None:
+    st.query_params["case"] = case_id
+
+
+def supersede_panel(link: SupersedeLink) -> None:
+    rows = "".join(
+        f'<div class="p2p-kv"><code>{h(key)}</code><span>{h(value)}</span></div>'
+        for key, value in link.rows
+    )
+    flag = status_pill("review", "Same reviewer") if link.same_reviewer else ""
+    render_html(
+        f"""
+        <section class="p2p-card p2p-outcome-panel">
+          <h3 class="p2p-panel-title">{h(link.title)}</h3>
+          {flag}
+          {rows}
+        </section>
+        """
+    )
+    st.button(
+        f"Open {link.other_case_id}",
+        width="stretch",
+        key="cases_open_linked",
+        on_click=open_case,
+        args=(link.other_case_id,),
+    )
+
+
 def case_detail(case_id: str) -> None:
     app = service()
     top_bar(["Cases", case_id], "/cases")
@@ -195,6 +232,16 @@ def case_detail(case_id: str) -> None:
                     switch_to("review", case=case_id)
             elif case.get("state", {}).get("outcome"):
                 outcome_panel(case)
+            link = supersede_link(case)
+            if link:
+                supersede_panel(link)
+            if can_be_superseded(case) and st.button(
+                "Process corrected invoice",
+                type="primary",
+                width="stretch",
+                key="cases_supersede",
+            ):
+                switch_to("process", supersedes=case_id)
 
 
 def render() -> None:

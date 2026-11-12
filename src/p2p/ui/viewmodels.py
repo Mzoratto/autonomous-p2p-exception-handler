@@ -68,6 +68,8 @@ EVENT_LABELS = {
     "HUMAN_REVIEW_REQUESTED": "Human review requested",
     "HUMAN_DECISION_RECEIVED": "Human decision received",
     "CASE_COMPLETED": "Case completed",
+    "CASE_SUPERSEDED": "Case superseded",
+    "SUPERSEDES_CASE": "Supersedes held case",
 }
 
 CURRENCY_SYMBOLS = {"EUR": "€", "USD": "$", "GBP": "£"}
@@ -114,6 +116,8 @@ def display_status(case: dict) -> StatusView:
             "source": case.get("outcome_source"),
         }
         action = outcome.get("action")
+        if action == "REQUEST_INFO" and case.get("superseded_by"):
+            return StatusView("request_info", "Request info · Superseded")
         if action in OUTCOME_LABELS:
             source = "Autonomous" if outcome.get("source") == "AUTONOMOUS" else "Human"
             return StatusView(ACTION_STATUS_KEYS[action], f"{OUTCOME_LABELS[action]} · {source}")
@@ -724,6 +728,8 @@ EVENT_DOTS = {
     "HUMAN_REVIEW_REQUESTED": "#c98512",
     "EXCEPTION_IDENTIFIED": "#c98512",
     "HUMAN_DECISION_RECEIVED": "#2f6fed",
+    "CASE_SUPERSEDED": "#2f6fed",
+    "SUPERSEDES_CASE": "#2f6fed",
 }
 HASH_KEYS = {"rules_sha256", "evidence_sha256"}
 
@@ -810,6 +816,65 @@ def outcome_view(case: dict) -> list[tuple[str, str]]:
         ("AI recommendation", recommendation),
         ("Note", note),
     ]
+
+
+# --- Supersede ------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SupersedeLink:
+    title: str
+    other_case_id: str
+    rows: list[tuple[str, str]]
+    same_reviewer: bool
+
+
+def can_be_superseded(case: dict) -> bool:
+    """A completed Request info case that no corrected invoice has replaced yet."""
+    outcome = (case.get("state") or {}).get("outcome") or {}
+    return (
+        case.get("status") == "COMPLETED"
+        and outcome.get("action") == "REQUEST_INFO"
+        and not case.get("superseded_by")
+    )
+
+
+def supersede_link(case: dict) -> SupersedeLink | None:
+    """The supersede link recorded on either side: the held case or its correction."""
+    for item in case.get("audit") or []:
+        data = item["data"]
+        if item["event_type"] == "CASE_SUPERSEDED":
+            title, other, other_invoice, label = (
+                "Superseded",
+                data["superseded_by"],
+                data["new_invoice_id"],
+                "Superseded by",
+            )
+        elif item["event_type"] == "SUPERSEDES_CASE":
+            title, other, other_invoice, label = (
+                "Supersedes a held case",
+                data["held_case_id"],
+                data["held_invoice_id"],
+                "Held case",
+            )
+        else:
+            continue
+        released = ", ".join(
+            f"Line {line}: {_number(quantity)}" for line, quantity in data["released"].items()
+        )
+        return SupersedeLink(
+            title=title,
+            other_case_id=other,
+            rows=[
+                (label, f"{other} · {other_invoice}"),
+                ("Request info by", data.get("held_reviewer") or "—"),
+                ("Linked by", data["reviewer"]),
+                ("Released", released or "—"),
+                ("Note", data["note"]),
+            ],
+            same_reviewer=bool(data.get("same_reviewer")),
+        )
+    return None
 
 
 def tab_labels(
