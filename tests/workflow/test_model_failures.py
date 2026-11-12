@@ -25,6 +25,21 @@ def test_model_outage_routes_straight_to_review_after_one_call(app):
     assert AuditEventType.RESOLUTION_PROPOSED not in events
 
 
+def test_exhausted_quota_sends_the_case_to_a_reviewer_as_model_unavailable(app):
+    reason = "OpenAI quota exhausted (insufficient_quota)"
+    use_workflow(app, FailingInvestigator(ModelUnavailableError(reason)))
+
+    result = app.process_invoice(demo_invoices()["03_large_price_variance"])
+
+    state = result["state"]
+    policy = state["policy_result"]
+    assert result["status"] == "PENDING_REVIEW"
+    assert state["model_error"] == f"Model unavailable: {reason}"
+    assert "The model was unavailable, so a reviewer must decide." in policy.reasons
+    check = next(item for item in policy.checks if item.rule == "ai_recommendation")
+    assert (check.passed, check.actual) == (False, "Model unavailable")
+
+
 def test_rejected_api_key_stops_processing_and_leaves_the_case_recoverable(app):
     use_workflow(app, FailingInvestigator(ModelAuthenticationError("Incorrect API key")))
     invoice = demo_invoices()["03_large_price_variance"]

@@ -99,6 +99,22 @@ def test_outages_become_model_unavailable(provider, error):
         provider.structured_response(Resolution, MESSAGES)
 
 
+def test_exhausted_quota_is_reported_as_an_outage_with_its_reason(provider):
+    with_outcome(
+        provider,
+        openai.RateLimitError(
+            "You exceeded your current quota, please check your plan and billing details.",
+            response=httpx.Response(429, request=REQUEST),
+            body={"code": "insufficient_quota", "type": "insufficient_quota"},
+        ),
+    )
+
+    with pytest.raises(
+        ModelUnavailableError, match=r"^OpenAI quota exhausted \(insufficient_quota\)$"
+    ):
+        provider.structured_response(Resolution, MESSAGES)
+
+
 @pytest.mark.parametrize(
     "error",
     [

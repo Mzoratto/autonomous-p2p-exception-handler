@@ -96,7 +96,12 @@ def recommendation_html(case: dict, auto_resolve: float) -> str:
         meter = ""
         confidence_text = ""
     revisions = int(state.get("reflection_count") or 0)
-    if revisions:
+    if state.get("model_unavailable"):
+        note = (
+            "Model unavailable, so the AI made no recommendation. "
+            "Decide from the match and policy evidence."
+        )
+    elif revisions:
         note = (
             f"Revised {revisions}× after the Critic rejected the first proposal. "
             "Policy requires review."

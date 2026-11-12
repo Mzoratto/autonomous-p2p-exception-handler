@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=9.0.3,<10",
+  "pytest-cov>=7,<8",
   "ruff>=0.9,<1",
 ]
 
@@ -34,6 +35,18 @@ packages = ["src/p2p"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["p2p"]
+# Spawned helper processes in the two-process test report their own coverage.
+parallel = true
+concurrency = ["thread", "multiprocessing"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# Measured 97% when this was set; a drop of more than a point fails CI.
+fail_under = 96
 
 [tool.ruff]
 line-length = 100
