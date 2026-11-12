@@ -25,7 +25,7 @@ from p2p.domain.models import (
 from p2p.domain.policy import DecisionPolicy
 from p2p.intelligence.services import Critic, Investigator, Resolver
 from p2p.ports import AuditRecorder, ERPRepository, ModelAuthenticationError, ModelUnavailableError
-from p2p.workflow.state import P2PState
+from p2p.workflow.state import P2PState, required
 
 logger = logging.getLogger("p2p.workflow")
 
@@ -67,9 +67,11 @@ def _record(
         "rules_sha256": hashlib.sha256(deps.rules.model_dump_json().encode()).hexdigest(),
         "attempt": state.get("reflection_count", 0),
     }
-    if state.get("erp_context"):
+    # Absent before load_context has run (ingest records events too), so optional here.
+    context = state.get("erp_context")
+    if context:
         provenance["evidence_sha256"] = hashlib.sha256(
-            state["erp_context"].model_dump_json().encode()
+            context.model_dump_json().encode()
         ).hexdigest()
     payload = {**(data or {}), **provenance}
     event_id = hashlib.sha256(
@@ -130,7 +132,7 @@ def load_context_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
 
 def match_node(state: P2PState, deps: WorkflowDependencies) -> dict:
-    result = deps.matcher.match(state["invoice"], state["erp_context"])
+    result = deps.matcher.match(state["invoice"], required(state, "erp_context", "match"))
     _record(
         deps,
         state,
@@ -150,16 +152,19 @@ def match_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
 
 def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
+    # Read before the try: a missing value is a workflow fault, not a model failure.
+    erp_context = required(state, "erp_context", "investigate")
+    match_result = required(state, "match_result", "investigate")
     try:
         result = deps.investigator.investigate(
             {
                 "invoice": state["invoice"].model_dump(mode="json"),
-                "erp_context": state["erp_context"].model_dump(mode="json"),
-                "match_result": state["match_result"].model_dump(mode="json"),
+                "erp_context": erp_context.model_dump(mode="json"),
+                "match_result": match_result.model_dump(mode="json"),
             }
         )
         result = InvestigationResult.model_validate(result)
-        available = {item.discrepancy_id: item for item in state["match_result"].discrepancies}
+        available = {item.discrepancy_id: item for item in match_result.discrepancies}
         for evidence in result.evidence:
             fact = available.get(evidence.evidence_id)
             if (
@@ -197,20 +202,21 @@ def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
 
 def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
+    match_result = required(state, "match_result", "resolve")
+    investigation = required(state, "investigation", "resolve")
+    critique = state.get("critique")  # None on the first attempt
     try:
         result = deps.resolver.resolve(
             {
                 "invoice": state["invoice"].model_dump(mode="json"),
-                "match_result": state["match_result"].model_dump(mode="json"),
-                "investigation": state["investigation"].model_dump(mode="json"),
-                "critique": state["critique"].model_dump(mode="json")
-                if state.get("critique")
-                else None,
+                "match_result": match_result.model_dump(mode="json"),
+                "investigation": investigation.model_dump(mode="json"),
+                "critique": critique.model_dump(mode="json") if critique else None,
                 "reflection_count": state.get("reflection_count", 0),
             }
         )
         result = Resolution.model_validate(result)
-        available = {item.discrepancy_id for item in state["match_result"].discrepancies}
+        available = {item.discrepancy_id for item in match_result.discrepancies}
         if not set(result.evidence_refs).issubset(available) or (
             available and not result.evidence_refs
         ):
@@ -247,12 +253,15 @@ def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
 
 def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
+    match_result = required(state, "match_result", "critique")
+    investigation = required(state, "investigation", "critique")
+    resolution = required(state, "resolution", "critique")
     try:
         critique = deps.critic.critique(
             {
-                "match_result": state["match_result"].model_dump(mode="json"),
-                "investigation": state["investigation"].model_dump(mode="json"),
-                "resolution": state["resolution"].model_dump(mode="json"),
+                "match_result": match_result.model_dump(mode="json"),
+                "investigation": investigation.model_dump(mode="json"),
+                "resolution": resolution.model_dump(mode="json"),
             }
         )
         critique = CritiqueResult.model_validate(critique)
@@ -272,7 +281,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
     count = state.get("reflection_count", 0) + (0 if critique.valid else 1)
     exhausted = not critique.valid and count >= deps.rules.reflection.max_iterations
-    confidence = state["resolution"].confidence
+    confidence = resolution.confidence
     adjusted = max(0, min(confidence, confidence + critique.confidence_adjustment))
     _record(
         deps,
@@ -288,7 +297,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         },
     )
     return {
-        "resolution": state["resolution"].model_copy(update={"confidence": adjusted}),
+        "resolution": resolution.model_copy(update={"confidence": adjusted}),
         "critique": critique,
         "reflection_count": count,
         "reflection_exhausted": exhausted,
@@ -300,7 +309,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 def policy_check_node(state: P2PState, deps: WorkflowDependencies) -> dict:
     result = deps.policy.evaluate(
         invoice=state["invoice"],
-        match_result=state["match_result"],
+        match_result=required(state, "match_result", "policy_check"),
         resolution=state.get("resolution"),
         reflection_exhausted=state.get("reflection_exhausted", False),
         model_error=state.get("model_error"),
@@ -336,9 +345,10 @@ def human_review_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             "invoice_id": state["invoice"].invoice_id,
             "invoice_total": str(state["invoice"].total),
             "proposed_action": proposed.action.value if proposed else DecisionType.APPROVE.value,
-            "policy_reasons": state["policy_result"].reasons,
+            "policy_reasons": required(state, "policy_result", "human_review").reasons,
             "discrepancies": [
-                item.model_dump(mode="json") for item in state["match_result"].discrepancies
+                item.model_dump(mode="json")
+                for item in required(state, "match_result", "human_review").discrepancies
             ],
         }
     )
@@ -354,17 +364,18 @@ def human_review_node(state: P2PState, deps: WorkflowDependencies) -> dict:
 
 
 def finalize_node(state: P2PState, deps: WorkflowDependencies) -> dict:
-    policy = state["policy_result"]
+    policy = required(state, "policy_result", "finalize")
     proposed = state.get("resolution")
     proposed_action = proposed.action if proposed else DecisionType.APPROVE
-    if state.get("human_review"):
-        action = state["human_review"].action
+    review = state.get("human_review")  # absent when policy permitted autonomous completion
+    if review:
+        action = review.action
         source = (
             DecisionSource.HUMAN_APPROVED
             if action is proposed_action
             else DecisionSource.HUMAN_OVERRIDDEN
         )
-        rationale = state["human_review"].comment or "Reviewer accepted the recorded action."
+        rationale = review.comment or "Reviewer accepted the recorded action."
     else:
         action = policy.enforced_action or proposed_action
         source = DecisionSource.AUTONOMOUS

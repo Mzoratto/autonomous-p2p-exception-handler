@@ -1,4 +1,4 @@
-.PHONY: setup seed run test coverage lint audit smoke-live
+.PHONY: setup seed run test coverage lint typecheck audit smoke-live
 
 setup:
 	uv sync --frozen --extra dev --python 3.11
@@ -26,6 +26,10 @@ smoke-live:
 
 lint:
 	.venv/bin/ruff check .
+
+# Pyright in standard mode on src/, pinned in the dev extra; settings in [tool.pyright].
+typecheck:
+	.venv/bin/pyright
 
 audit:
 	uvx pip-audit --path "$$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"

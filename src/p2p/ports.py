@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Protocol, TypeVar
+from typing import Literal, Protocol, TypedDict, TypeVar
 
 from pydantic import BaseModel
 
@@ -14,6 +14,13 @@ from p2p.domain.models import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class ChatMessage(TypedDict):
+    """One message to the model; the services send a system prompt and a JSON user message."""
+
+    role: Literal["system", "user"]
+    content: str
 
 
 class ERPRepository(Protocol):
@@ -37,7 +44,7 @@ class AuditRecorder(Protocol):
 
 
 class ModelProvider(Protocol):
-    def structured_response(self, schema: type[T], messages: list[dict[str, str]]) -> T: ...
+    def structured_response(self, schema: type[T], messages: list[ChatMessage]) -> T: ...
 
 
 class ModelUnavailableError(RuntimeError):

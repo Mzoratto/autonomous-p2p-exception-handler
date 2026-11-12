@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import cache
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urlencode
 
 import streamlit as st
@@ -22,7 +23,7 @@ def load_styles() -> None:
     render_html(f"<style>{_styles()}</style>")
 
 
-def switch_to(page: str, **query_params: str) -> None:
+def switch_to(page: str, **query_params: str) -> NoReturn:
     """Open a registered page; call from the script body, not from a widget callback."""
     st.switch_page(st.session_state["p2p_pages"][page], query_params=query_params or None)
 
@@ -94,7 +95,7 @@ def show_failure(message: str, exc: Exception) -> None:
 SETUP_ERROR_KEY = "p2p_setup_error"
 
 
-def setup_screen(title: str, fix: str | None = None) -> None:
+def setup_screen(title: str, fix: str | None = None) -> NoReturn:
     """Replace the app with the ways out of a live-mode configuration fault."""
     with st.container(key="setup-screen"):
         st.title(title)
@@ -118,7 +119,7 @@ def setup_screen(title: str, fix: str | None = None) -> None:
     st.stop()
 
 
-def mark_authentication_failure() -> None:
+def mark_authentication_failure() -> NoReturn:
     """Show the setup screen on the next run; call when a command raises ModelAuthenticationError."""
     st.session_state[SETUP_ERROR_KEY] = "auth"
     st.rerun()

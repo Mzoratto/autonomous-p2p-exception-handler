@@ -205,12 +205,13 @@ The dashboard is available at <http://localhost:8501>. Compose binds the unauthe
 make test
 make coverage  # tests with a coverage report; fails under the floor in pyproject.toml
 make lint
+make typecheck  # pyright (pinned in the dev extra) on src/
 make audit  # dependency advisory lookup; requires network
 ```
 
-The test suite runs without network access. It covers financial validation, post-validation arithmetic corruption, matching scenarios, tolerance policy, duplicate protection, workflow routing, bounded reflection, malformed model output, model outages, SQLite adapters, durable interrupts, human resume behavior, and two OS processes sharing one database. GitHub Actions runs lint, format check and tests with coverage on every supported Python version (3.11 to 3.14), the dependency audit, and a job that builds the Docker image, starts it and waits for its health check. Audit regression coverage includes hostile typed model output, fractional thresholds, concurrent ingestion/review, save failures, restart recovery and post-review UI navigation. See [audit remediation and recovery](docs/audit-remediation.md).
+The test suite runs without network access. It covers financial validation, post-validation arithmetic corruption, matching scenarios, tolerance policy, duplicate protection, workflow routing, bounded reflection, malformed model output, model outages, SQLite adapters, durable interrupts, human resume behavior, and two OS processes sharing one database. GitHub Actions runs lint, format check and tests with coverage on every supported Python version (3.11 to 3.14), the dependency audit, a pyright type check (`typecheck`), and a job that builds the Docker image, starts it and waits for its health check. Audit regression coverage includes hostile typed model output, fractional thresholds, concurrent ingestion/review, save failures, restart recovery and post-review UI navigation. See [audit remediation and recovery](docs/audit-remediation.md).
 
-The required status checks on `main` mirror the CI Python matrix and the docker job (`test (Python 3.11)` to `test (Python 3.14)`, `docker image`), so a PR that changes the matrix or renames a job must update the branch protection in the same PR.
+The required status checks on `main` mirror the CI Python matrix, the typecheck job and the docker job (`test (Python 3.11)` to `test (Python 3.14)`, `typecheck`, `docker image`), so a PR that changes the matrix or renames a job must update the branch protection in the same PR.
 
 ## Included scenarios
 
