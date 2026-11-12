@@ -97,7 +97,8 @@ Running all ten in order in one database: still 3 completed and 7 pending; 04 be
 - **Python 3.15** is not in the CI matrix: uv 0.11.29 has no 3.15 build to test against.
 - **Streamlit-owned controls.** The tab-strip scroll arrows are 18 × 35 px (below the 24 px target size; tabs are also reachable by keyboard and swipe), and disabled buttons use Streamlit's low-contrast grey (inactive controls are exempt from WCAG contrast).
 - **Accepted design approximations.** Nav count instead of a badge, Streamlit's collapsing sidebar instead of a top row on narrow screens, coloured text instead of chips in the Cases table, a popover with a copyable link, a top bar that is not sticky; KPI trends stay hidden until enough history exists.
-- **Not built from the Phase 7 plan:** sticky review queue and decision columns at ≥ 960 px (not in the Phase 7 scope that was approved).
+- **Sticky decision panel (built after 1.0.0).** On the Review page the decision panel, or the recovery card in its place, is sticky whenever it sits beside the case detail: it stays in view while the case detail scrolls. A container query on the review workbench applies it when the workbench is at least 1016 px wide, the width at which queue, case detail and decision panel fit on one row (260 + 400 + 300 px and two 28 px gaps). That is a 1404 px window with the sidebar open and 1156 px with it collapsed. Where the panel wraps below the case detail nothing changes. On a short window the panel scrolls inside itself. Scoped CSS, no JavaScript.
+- **Sticky queue column: dropped.** The queue grows by about 167 px for each pending case (seven demo cases are about 1,220 px), so from five cases it is taller than a 900 px window. Pinned, its lower cards would be reachable only through a second inner scrollbar beside the decision panel's. The queue is also not needed while reading a case: after a decision the next case opens by itself.
 
 ## Shared contracts (used by several phases)
 

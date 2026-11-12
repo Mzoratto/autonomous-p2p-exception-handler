@@ -225,6 +225,19 @@ a:focus-visible, button:focus-visible, summary:focus-visible, [role="tab"]:focus
 /* The case column wraps below the queue before it gets too narrow to read.
    Streamlit wraps each child of a horizontal container; the wrapper is the flex item. */
 .st-key-review-workbench > :has(> .st-key-review-case) { flex: 1 1 400px; min-width: min(400px, 100%); }
+/* The decision panel stays in view while the case detail scrolls, whenever it sits beside the
+   detail. That is a property of the workbench's own width, not the viewport's (the sidebar can
+   be open or collapsed), so the rule is a container query on the workbench.
+   1016px = 260 queue + 400 case minimum (rule above) + 300 decision + two 28px gaps: the width
+   at which the three columns stop wrapping. The 260 and 300 are set in pages/review.py; change
+   both places together.
+   Sticky goes on Streamlit's wrapper, which is the flex item; the main area is the scroll
+   container and nothing in between clips overflow. 4.5rem clears the 3.75rem header. On a
+   short window the panel scrolls inside itself, so Submit is always reachable. */
+.st-key-review-workbench { container: p2p-workbench / inline-size; }
+@container p2p-workbench (min-width: 1016px) {
+  .st-key-review-workbench > :has(> .st-key-review-decision) { position: sticky; top: 4.5rem; max-height: calc(100vh - 5.5rem); overflow-y: auto; }
+}
 .p2p-queue-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .p2p-queue-head h1 { margin: 0; padding: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
 .p2p-queue-head span { font-size: 13px; color: var(--muted); }
