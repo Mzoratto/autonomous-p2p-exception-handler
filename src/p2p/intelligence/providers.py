@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import TypeVar
 
@@ -168,6 +169,17 @@ class MockModelProvider:
         return CritiqueResult(valid=True, confidence_adjustment=0)
 
 
+# OpenAI-style keys, whole or masked as OpenAI prints them ("sk-proj-****abcd").
+_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_*\-]{4,}")
+
+
+def redact_secret(text: str, secret: str | None = None) -> str:
+    """Remove an API key, whole or masked, from text that may be shown or logged."""
+    if secret:
+        text = text.replace(secret, "[redacted]")
+    return _KEY_PATTERN.sub("[redacted]", text)
+
+
 class OpenAIModelProvider:
     """Live provider using OpenAI native Pydantic structured outputs."""
 
@@ -175,6 +187,7 @@ class OpenAIModelProvider:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is required when DEMO_MODE is false")
+        self._api_key = api_key
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
         base_url = os.getenv("OPENAI_BASE_URL") or None
         self.client = OpenAI(
@@ -195,19 +208,26 @@ class OpenAIModelProvider:
                 text_format=schema,
                 store=False,
             )
+        # Every mapped error is raised "from None": the original exception may echo the key,
+        # and a chained cause would print it in logged tracebacks. The new message is redacted
+        # and names the original error type.
         except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
             # A rejected key, or one without access to the model, is a configuration fault;
             # routing cases to review would hide it.
-            raise ModelAuthenticationError(str(exc)) from exc
+            raise ModelAuthenticationError(redact_secret(str(exc), self._api_key)) from None
         except openai.RateLimitError as exc:
             # An exhausted quota is an outage like any other: the case goes to a reviewer.
             # Its reason is named, since waiting will not clear it.
             if exc.code == "insufficient_quota":
-                raise ModelUnavailableError("OpenAI quota exhausted (insufficient_quota)") from exc
-            raise ModelUnavailableError(f"{type(exc).__name__}: {exc}") from exc
+                raise ModelUnavailableError("OpenAI quota exhausted (insufficient_quota)") from None
+            raise ModelUnavailableError(
+                f"{type(exc).__name__}: {redact_secret(str(exc), self._api_key)}"
+            ) from None
         except (openai.APIConnectionError, openai.InternalServerError) as exc:
             # APIConnectionError includes timeouts.
-            raise ModelUnavailableError(f"{type(exc).__name__}: {exc}") from exc
+            raise ModelUnavailableError(
+                f"{type(exc).__name__}: {redact_secret(str(exc), self._api_key)}"
+            ) from None
         usage = getattr(response, "usage", None)
         self.last_call = {
             "provider": "openai",
