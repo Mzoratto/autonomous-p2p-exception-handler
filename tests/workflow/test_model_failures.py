@@ -1,5 +1,5 @@
 import pytest
-from workflow_support import FailingInvestigator, use_workflow
+from workflow_support import FailingModel, use_workflow
 
 from p2p.domain.models import AuditEventType
 from p2p.infrastructure.database import demo_invoices
@@ -12,7 +12,7 @@ def event_types(app, case_id: str) -> list[AuditEventType]:
 
 
 def test_model_outage_routes_straight_to_review_after_one_call(app):
-    provider = FailingInvestigator(ModelUnavailableError("APITimeoutError: Request timed out."))
+    provider = FailingModel(ModelUnavailableError("APITimeoutError: Request timed out."))
     use_workflow(app, provider)
 
     result = app.process_invoice(demo_invoices()["03_large_price_variance"])
@@ -27,7 +27,7 @@ def test_model_outage_routes_straight_to_review_after_one_call(app):
 
 def test_exhausted_quota_sends_the_case_to_a_reviewer_as_model_unavailable(app):
     reason = "OpenAI quota exhausted (insufficient_quota)"
-    use_workflow(app, FailingInvestigator(ModelUnavailableError(reason)))
+    use_workflow(app, FailingModel(ModelUnavailableError(reason)))
 
     result = app.process_invoice(demo_invoices()["03_large_price_variance"])
 
@@ -41,7 +41,7 @@ def test_exhausted_quota_sends_the_case_to_a_reviewer_as_model_unavailable(app):
 
 
 def test_rejected_api_key_stops_processing_and_leaves_the_case_recoverable(app):
-    use_workflow(app, FailingInvestigator(ModelAuthenticationError("Incorrect API key")))
+    use_workflow(app, FailingModel(ModelAuthenticationError("Incorrect API key")))
     invoice = demo_invoices()["03_large_price_variance"]
 
     with pytest.raises(ModelAuthenticationError):

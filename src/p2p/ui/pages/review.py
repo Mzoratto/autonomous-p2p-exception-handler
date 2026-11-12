@@ -96,7 +96,13 @@ def recommendation_html(case: dict, auto_resolve: float) -> str:
         meter = ""
         confidence_text = ""
     revisions = int(state.get("reflection_count") or 0)
-    if state.get("model_unavailable"):
+    if state.get("model_unavailable") and resolution and state.get("critique"):
+        # The Resolver answered; the Critic's check is the step that failed.
+        note = (
+            "Model unavailable before the Critic checked this recommendation. "
+            "Treat it as unchecked and decide from the match and policy evidence."
+        )
+    elif state.get("model_unavailable"):
         note = (
             "Model unavailable, so the AI made no recommendation. "
             "Decide from the match and policy evidence."

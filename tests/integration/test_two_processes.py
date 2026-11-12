@@ -1,12 +1,13 @@
 import multiprocessing
 import time
 
-from process_support import process_slowly
+from process_support import process_held
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.infrastructure.database import demo_invoices
 
-SLOW_SECONDS = 4.0
+# Upper bound only: the reader releases the writer as soon as its checks are done.
+HOLD_SECONDS = 30.0
 
 
 def timed(call):
@@ -22,10 +23,10 @@ def test_a_second_process_reads_while_the_first_runs_a_slow_case(tmp_path):
     finished = reader.process_invoice(demo_invoices()["01_exact_match"])["case_id"]
 
     spawn = multiprocessing.get_context("spawn")
-    started, results = spawn.Event(), spawn.Queue()
+    started, release, results = spawn.Event(), spawn.Event(), spawn.Queue()
     writer = spawn.Process(
-        target=process_slowly,
-        args=(url, "03_large_price_variance", started, SLOW_SECONDS, results),
+        target=process_held,
+        args=(url, "03_large_price_variance", started, release, HOLD_SECONDS, results),
     )
     writer.start()
     try:
@@ -37,9 +38,9 @@ def test_a_second_process_reads_while_the_first_runs_a_slow_case(tmp_path):
         finished_case, other_time = timed(lambda: reader.get_case(finished))
         _, refresh_time = timed(reader.refresh_open_cases)
         still_running = writer.is_alive()
-
-        writer.join(60)
     finally:
+        release.set()
+        writer.join(60)
         if writer.is_alive():
             writer.kill()
         runtime.close()
