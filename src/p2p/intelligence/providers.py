@@ -199,11 +199,13 @@ class OpenAIModelProvider:
             # A rejected key, or one without access to the model, is a configuration fault;
             # routing cases to review would hide it.
             raise ModelAuthenticationError(str(exc)) from exc
-        except (
-            openai.APIConnectionError,
-            openai.RateLimitError,
-            openai.InternalServerError,
-        ) as exc:
+        except openai.RateLimitError as exc:
+            # An exhausted quota is an outage like any other: the case goes to a reviewer.
+            # Its reason is named, since waiting will not clear it.
+            if exc.code == "insufficient_quota":
+                raise ModelUnavailableError("OpenAI quota exhausted (insufficient_quota)") from exc
+            raise ModelUnavailableError(f"{type(exc).__name__}: {exc}") from exc
+        except (openai.APIConnectionError, openai.InternalServerError) as exc:
             # APIConnectionError includes timeouts.
             raise ModelUnavailableError(f"{type(exc).__name__}: {exc}") from exc
         usage = getattr(response, "usage", None)

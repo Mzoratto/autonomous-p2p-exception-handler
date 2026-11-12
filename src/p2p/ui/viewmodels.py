@@ -548,6 +548,7 @@ class AiStoryView:
     attempts: list[Attempt] = field(default_factory=list)
     diff: list[tuple[str, str, str]] = field(default_factory=list)
     model_error: str | None = None
+    model_unavailable: bool = False
 
     @property
     def rejected_attempt(self) -> bool:
@@ -658,6 +659,7 @@ def ai_story(case: dict, rules: BusinessRules) -> AiStoryView:
         attempts=attempts,
         diff=diff,
         model_error=state.get("model_error"),
+        model_unavailable=bool(state.get("model_unavailable")),
     )
 
 

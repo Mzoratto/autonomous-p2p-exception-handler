@@ -1,4 +1,4 @@
-.PHONY: setup seed run test lint audit
+.PHONY: setup seed run test coverage lint audit
 
 setup:
 	uv sync --frozen --extra dev --python 3.11
@@ -11,6 +11,9 @@ run:
 
 test:
 	.venv/bin/pytest
+
+coverage:
+	.venv/bin/pytest --cov --cov-report=term
 
 lint:
 	.venv/bin/ruff check .

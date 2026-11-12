@@ -56,6 +56,7 @@ class DecisionPolicy:
         resolution: Resolution | None,
         reflection_exhausted: bool,
         model_error: str | None,
+        model_unavailable: bool = False,
     ) -> list[PolicyCheck]:
         """The checklist shown to reviewers; it explains `evaluate`, it never decides."""
         rules = self.rules
@@ -184,7 +185,9 @@ class DecisionPolicy:
 
         ai_problems = []
         if model_error:
-            ai_problems.append("Model or evidence validation failed")
+            ai_problems.append(
+                "Model unavailable" if model_unavailable else "Model or evidence validation failed"
+            )
         if resolution and resolution.action not in AUTONOMOUS_ACTIONS:
             ai_problems.append(f"{resolution.action} must be decided by a reviewer")
         if reflection_exhausted:
@@ -213,8 +216,11 @@ class DecisionPolicy:
         resolution: Resolution | None,
         reflection_exhausted: bool = False,
         model_error: str | None = None,
+        model_unavailable: bool = False,
     ) -> PolicyResult:
-        checks = self._checks(invoice, match_result, resolution, reflection_exhausted, model_error)
+        checks = self._checks(
+            invoice, match_result, resolution, reflection_exhausted, model_error, model_unavailable
+        )
         reasons: list[str] = []
         triggered: list[str] = []
         types = {item.type for item in match_result.discrepancies}
@@ -230,7 +236,11 @@ class DecisionPolicy:
             )
 
         if model_error:
-            reasons.append("An unresolved model or evidence validation failure requires review.")
+            reasons.append(
+                "The model was unavailable, so a reviewer must decide."
+                if model_unavailable
+                else "An unresolved model or evidence validation failure requires review."
+            )
             triggered.append("model_error")
         if not match_result.matched or any(
             item.type != DiscrepancyType.PRICE_VARIANCE

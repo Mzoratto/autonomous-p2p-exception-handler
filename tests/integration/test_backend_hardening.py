@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
-from workflow_support import BrokenMatcher, use_workflow
+from workflow_support import BrokenMatcher, FailingModel, use_workflow
 
 from p2p.application.service import CaseService, create_runtime
-from p2p.domain.models import DecisionType, HumanReview
+from p2p.domain.models import CritiqueResult, DecisionType, HumanReview, InvestigationResult
 from p2p.infrastructure.database import Database, demo_invoices
+from p2p.ports import ModelUnavailableError
 from p2p.ui.viewmodels import display_status
 
 REPO = Path(__file__).parents[2]
@@ -224,3 +225,40 @@ def test_a_failed_review_run_keeps_its_error_until_the_review_is_applied(app, mo
     app.review_case(case_id, review, checkpoint_id=case["checkpoint_id"])
 
     assert app.get_case(case_id)["last_error"] is None
+
+
+@pytest.mark.parametrize(
+    ("schema", "note"),
+    [
+        # The Investigator never answered: there is no recommendation at all.
+        (InvestigationResult, "Model unavailable, so the AI made no recommendation."),
+        # The Resolver answered but the Critic did not: the recommendation is unchecked.
+        (CritiqueResult, "Model unavailable before the Critic checked this recommendation."),
+    ],
+)
+def test_reviewer_sees_model_unavailable_not_a_validation_failure(
+    tmp_path, monkeypatch, schema, note
+):
+    url = f"sqlite:///{tmp_path / 'quota.db'}"
+    monkeypatch.setenv("DEMO_MODE", "true")
+    monkeypatch.setenv("P2P_DATABASE_URL", url)
+    monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
+    runtime = create_runtime(database_url=url, demo_mode=True)
+    try:
+        app = CaseService(runtime)
+        quota = ModelUnavailableError("OpenAI quota exhausted (insufficient_quota)")
+        use_workflow(app, FailingModel(quota, schema), checkpointer=runtime.graph.checkpointer)
+        case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
+    finally:
+        runtime.close()
+
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15)
+    at.query_params["case"] = case_id
+    at.run()
+    at.switch_page("src/p2p/ui/pages/review.py").run()
+
+    assert not at.exception
+    page = " ".join(element.proto.body for element in at.get("html"))
+    assert note in page
+    assert "Model output failed validation" not in page
+    assert "insufficient_quota" in page

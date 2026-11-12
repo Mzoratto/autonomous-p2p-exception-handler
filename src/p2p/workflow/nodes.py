@@ -35,6 +35,13 @@ def _model_call(service: Any) -> dict | None:
     return getattr(service.provider, "last_call", None)
 
 
+def _failure(exc: Exception, step: str) -> tuple[str, bool]:
+    """The stored error for a failed AI step, and whether the model was unreachable."""
+    if isinstance(exc, ModelUnavailableError):
+        return f"Model unavailable: {exc}", True
+    return f"{type(exc).__name__}: structured {step} failed", False
+
+
 @dataclass(frozen=True)
 class WorkflowDependencies:
     erp: ERPRepository
@@ -174,8 +181,7 @@ def investigate_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             suggested_action=DecisionType.ESCALATE,
             confidence=0,
         )
-        error = f"{type(exc).__name__}: structured investigation failed"
-        unavailable = isinstance(exc, ModelUnavailableError)
+        error, unavailable = _failure(exc, "investigation")
     _record(
         deps,
         state,
@@ -220,8 +226,7 @@ def resolve_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             rationale="Structured resolution generation failed; deterministic fallback escalates.",
             confidence=0,
         )
-        error = f"{type(exc).__name__}: structured resolution failed"
-        unavailable = isinstance(exc, ModelUnavailableError)
+        error, unavailable = _failure(exc, "resolution")
     event_type = (
         AuditEventType.RESOLUTION_REVISED
         if state.get("reflection_count", 0) > 0
@@ -263,8 +268,7 @@ def critique_node(state: P2PState, deps: WorkflowDependencies) -> dict:
             recommended_changes=["Escalate for human review."],
             confidence_adjustment=-1,
         )
-        error = f"{type(exc).__name__}: structured critique failed"
-        unavailable = isinstance(exc, ModelUnavailableError)
+        error, unavailable = _failure(exc, "critique")
 
     count = state.get("reflection_count", 0) + (0 if critique.valid else 1)
     exhausted = not critique.valid and count >= deps.rules.reflection.max_iterations
@@ -300,6 +304,7 @@ def policy_check_node(state: P2PState, deps: WorkflowDependencies) -> dict:
         resolution=state.get("resolution"),
         reflection_exhausted=state.get("reflection_exhausted", False),
         model_error=state.get("model_error"),
+        model_unavailable=state.get("model_unavailable", False),
     )
     _record(
         deps,

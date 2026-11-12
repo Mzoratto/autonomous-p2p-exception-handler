@@ -11,16 +11,17 @@ from p2p.workflow.graph import build_graph
 from p2p.workflow.nodes import WorkflowDependencies
 
 
-class FailingInvestigator(MockModelProvider):
-    """Counts model calls and fails the Investigator call with the given error."""
+class FailingModel(MockModelProvider):
+    """Counts model calls and fails every call for one schema (the Investigator's by default)."""
 
-    def __init__(self, error: Exception):
+    def __init__(self, error: Exception, schema: type = InvestigationResult):
         self.error = error
+        self.schema = schema
         self.calls = 0
 
     def structured_response(self, schema, messages):
         self.calls += 1
-        if schema is InvestigationResult:
+        if schema is self.schema:
             raise self.error
         return super().structured_response(schema, messages)
 

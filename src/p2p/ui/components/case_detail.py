@@ -183,8 +183,13 @@ def ai_html(story: AiStoryView) -> str:
         </div>
         """
     investigation = story.investigation
+    headline = (
+        "Model unavailable; the case was routed to a reviewer."
+        if story.model_unavailable
+        else "Model output failed validation; the case was routed to a reviewer."
+    )
     error = (
-        f'<div class="p2p-callout p2p-callout-warning">{icon("warning")}<div><strong>Model output failed validation; the case was routed to a reviewer.</strong><code>{h(story.model_error)}</code></div></div>'
+        f'<div class="p2p-callout p2p-callout-warning">{icon("warning")}<div><strong>{h(headline)}</strong><code>{h(story.model_error)}</code></div></div>'
         if story.model_error
         else ""
     )

@@ -142,7 +142,7 @@ Optional live-mode settings:
 
 Requests are sent with `store=False`. Each AI audit event records the model, response id, token counts and latency of the call.
 
-When the model service cannot be reached (timeout, connection error, rate limit, server error), the workflow stops asking the model, records the failure and sends the case to a reviewer. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
+When the model service cannot be reached (timeout, connection error, rate limit, server error, or an exhausted quota), the workflow stops asking the model, records the failure and sends the case to a reviewer; the reviewer sees "Model unavailable" and the reason. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
 
 Never commit a real API key. `.env.local` is ignored by Git.
 
@@ -152,17 +152,27 @@ Never commit a real API key. `.env.local` is ignored by Git.
 docker compose up --build
 ```
 
-The dashboard is available at <http://localhost:8501>. Compose binds the unauthenticated dashboard to host loopback only. A named volume is configured to retain SQLite case and checkpoint state between container restarts; image startup and volume survival require a Docker runtime check. The image does not copy local credential files.
+The dashboard is available at <http://localhost:8501>. Compose binds the unauthenticated dashboard to host loopback only. The image does not copy local credential files.
+
+- **Base images:** Python 3.11.18 (slim, Debian bookworm) and uv 0.11.29, both pinned by version and digest.
+- **User:** the app runs as the unprivileged user `app` (uid 10001). Only `/app/data` is writable; it holds the database, checkpoints, WAL files and the command lock file.
+- **Health:** a `HEALTHCHECK` polls Streamlit's `/_stcore/health`.
+- **Data:** the named volume keeps cases and checkpoints across container restarts. A new volume takes its ownership from the image. A volume created by an older image that ran as root must be handed to the new user once:
+
+  ```bash
+  docker compose run --rm --user root p2p-handler chown -R 10001 /app/data/demo
+  ```
 
 ## Test and lint
 
 ```bash
 make test
+make coverage  # tests with a coverage report; fails under the floor in pyproject.toml
 make lint
 make audit  # dependency advisory lookup; requires network
 ```
 
-The test suite runs without network access. It covers financial validation, post-validation arithmetic corruption, matching scenarios, tolerance policy, duplicate protection, workflow routing, bounded reflection, malformed model output, SQLite adapters, durable interrupts, and human resume behavior. GitHub Actions repeats the lint, test and dependency advisory checks on pushes and pull requests. Audit regression coverage includes hostile typed model output, fractional thresholds, concurrent ingestion/review, save failures, restart recovery and post-review UI navigation. See [audit remediation and recovery](docs/audit-remediation.md).
+The test suite runs without network access. It covers financial validation, post-validation arithmetic corruption, matching scenarios, tolerance policy, duplicate protection, workflow routing, bounded reflection, malformed model output, model outages, SQLite adapters, durable interrupts, human resume behavior, and two OS processes sharing one database. GitHub Actions runs lint, format check and tests with coverage on every supported Python version (3.11 to 3.14), the dependency audit, and a job that builds the Docker image, starts it and waits for its health check. Audit regression coverage includes hostile typed model output, fractional thresholds, concurrent ingestion/review, save failures, restart recovery and post-review UI navigation. See [audit remediation and recovery](docs/audit-remediation.md).
 
 ## Included scenarios
 
