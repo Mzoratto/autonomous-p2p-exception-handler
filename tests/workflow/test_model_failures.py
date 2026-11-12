@@ -1,7 +1,7 @@
 import pytest
 from workflow_support import FailingModel, use_workflow
 
-from p2p.domain.models import AuditEventType
+from p2p.domain.models import AuditEventType, Invoice, Resolution
 from p2p.infrastructure.database import demo_invoices
 from p2p.intelligence.providers import MockModelProvider
 from p2p.ports import ModelAuthenticationError, ModelUnavailableError
@@ -57,3 +57,29 @@ def test_rejected_api_key_stops_processing_and_leaves_the_case_recoverable(app):
 
     assert (resumed["case_id"], resumed["status"]) == (row["case_id"], "PENDING_REVIEW")
     assert app.query_cases()[0][0]["last_error"] is None
+
+
+def test_retry_after_a_rejected_key_at_resolve_resumes_without_re_investigating(app):
+    class RejectsFirstResolverCall(MockModelProvider):
+        rejected = False
+
+        def structured_response(self, schema, messages):
+            if schema is Resolution and not self.rejected:
+                self.rejected = True
+                raise ModelAuthenticationError("Incorrect API key")
+            return super().structured_response(schema, messages)
+
+    use_workflow(app, RejectsFirstResolverCall())
+
+    with pytest.raises(ModelAuthenticationError):
+        app.process_invoice(demo_invoices()["03_large_price_variance"])
+    [row], _ = app.query_cases()
+    assert row["status"] == "PROCESSING"
+
+    # The Retry button's call (retry_case): the stored invoice resumes the run from its
+    # checkpoint at resolve. A value missing from the restored state raises MissingStateError.
+    case = app.get_case(row["case_id"])
+    resumed = app.process_invoice(Invoice.model_validate(case["invoice"]))
+
+    assert (resumed["case_id"], resumed["status"]) == (row["case_id"], "PENDING_REVIEW")
+    assert event_types(app, row["case_id"]).count(AuditEventType.INVESTIGATION_COMPLETED) == 1
