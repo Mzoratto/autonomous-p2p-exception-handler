@@ -318,6 +318,8 @@ def render() -> None:
     if case and st.session_state.get("review_confirm", {}).get("case_id") == selected_id:
         confirm_dialog(case, app)
 
+    # The column widths here (260 and 300), the 400 px case minimum and the 28 px gaps add up to
+    # the 1016 px container query in styles.css that keeps the decision panel in view.
     with st.container(horizontal=True, wrap=True, gap="medium", key="review-workbench"):
         with st.container(width=260, key="review-queue"):
             render_html(
