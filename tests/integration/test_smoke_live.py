@@ -2,7 +2,9 @@
 
 import hashlib
 import importlib.util
+import json
 import logging
+import re
 import sqlite3
 import sys
 import tempfile
@@ -21,6 +23,17 @@ from p2p.intelligence.providers import MockModelProvider
 REPO = Path(__file__).parents[2]
 KEY = "sk-test-SMOKE-SECRET-Q9Z7"
 REQUEST = httpx.Request("POST", "https://api.openai.com/v1/responses")
+COLUMNS = [
+    "Invoice",
+    "Expected",
+    "Status",
+    "Routed by",
+    "Decision source",
+    "Model",
+    "Tokens",
+    "Latency",
+    "Error",
+]
 
 
 def load_script():
@@ -35,6 +48,7 @@ class FakeOpenAI:
     """Stands in for openai.OpenAI; answers with the mock provider's structured outputs."""
 
     mode = "ok"
+    fail_invoices: frozenset[str] = frozenset()
     calls = 0
 
     def __init__(self, **settings):
@@ -50,7 +64,8 @@ class FakeOpenAI:
                 response=httpx.Response(401, request=REQUEST),
                 body=None,
             )
-        if FakeOpenAI.mode == "timeout":
+        context = json.dumps(input)
+        if FakeOpenAI.mode == "timeout" or any(i in context for i in FakeOpenAI.fail_invoices):
             raise openai.APITimeoutError(request=REQUEST)
         parsed = MockModelProvider().structured_response(text_format, input)
         return SimpleNamespace(
@@ -61,24 +76,52 @@ class FakeOpenAI:
 
 
 @pytest.fixture
-def source(tmp_path, monkeypatch) -> Path:
-    """A seeded database with one processed case, standing in for the user's data."""
-    path = tmp_path / "data" / "p2p.db"
+def live(tmp_path, monkeypatch):
+    """A key in the environment, the fake client, and temporary files under tmp_path."""
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    monkeypatch.setenv("OPENAI_MODEL", "gpt-4.1-mini")  # the table shows the configured model
+    monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
+    for name in ("OPENAI_BASE_URL", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setattr(providers, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(FakeOpenAI, "mode", "ok")
+    monkeypatch.setattr(FakeOpenAI, "fail_invoices", frozenset())
+    monkeypatch.setattr(FakeOpenAI, "calls", 0)
+    # Temporary databases go under tmp_path; tempfile caches its directory, so patch it.
+    (tmp_path / "tmp").mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+    # The default mode never reads P2P_DATABASE_URL; point it somewhere that must stay absent.
+    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{tmp_path / 'untouched' / 'p2p.db'}")
+    return tmp_path
+
+
+@pytest.fixture
+def source(live, monkeypatch) -> Path:
+    """A database whose demo PO lines are already reserved, standing in for the user's data."""
+    path = live / "data" / "p2p.db"
     runtime = create_runtime(database_url=f"sqlite:///{path}", demo_mode=True)
-    CaseService(runtime).process_invoice(demo_invoices()["01_exact_match"])
+    service = CaseService(runtime)
+    for invoice in demo_invoices().values():
+        service.process_invoice(invoice)
     runtime.close()
     # Close pooled connections too, so the WAL is checkpointed and the file is at rest.
     runtime.repository.database.engine.dispose()
     monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{path}")
-    monkeypatch.setenv("P2P_RULES_PATH", str(REPO / "config" / "business_rules.yaml"))
-    monkeypatch.setenv("OPENAI_MODEL", "gpt-4.1-mini")  # the table shows the configured model
-    monkeypatch.setattr(providers, "OpenAI", FakeOpenAI)
-    monkeypatch.setattr(FakeOpenAI, "mode", "ok")
-    monkeypatch.setattr(FakeOpenAI, "calls", 0)
-    # Copies go under tmp_path; tempfile caches its directory, so patch it directly.
-    (tmp_path / "tmp").mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
     return path
+
+
+def table(out: str) -> dict[str, dict[str, str]]:
+    """The printed table, keyed by invoice id."""
+    lines = out.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Invoice  "))
+    rows = {}
+    for line in lines[start + 1 :]:
+        if not line.strip():
+            break
+        cells = re.split(r"\s{2,}", line.strip())
+        rows[cells[0]] = dict(zip(COLUMNS, cells, strict=False))
+    return rows
 
 
 def fingerprint(path: Path) -> tuple[str, int]:
@@ -91,47 +134,106 @@ def secrets_in(*texts: str) -> list[str]:
     return [part for part in (KEY, KEY[-4:]) if any(part in text for text in texts)]
 
 
-def test_refuses_to_run_without_a_key(tmp_path, monkeypatch, capsys):
-    missing = tmp_path / "never-created.db"
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{missing}")
+def test_refuses_to_run_without_a_key(live, monkeypatch, capsys):
+    monkeypatch.delenv("OPENAI_API_KEY")
 
     assert load_script().main([]) == 2
 
     assert "OPENAI_API_KEY" in capsys.readouterr().err
-    assert not missing.exists()
+    assert not (live / "untouched").exists()
 
 
-def test_runs_every_demo_invoice_on_a_copy(source, monkeypatch, capsys):
-    monkeypatch.setenv("OPENAI_API_KEY", KEY)
-    before = fingerprint(source)
-
+def test_each_scenario_runs_on_its_own_fresh_seed_and_matches_the_mock(live, capsys):
+    """On untouched POs every scenario reaches the outcome the mock provider produces."""
     assert load_script().main([]) == 0
 
     out, err = capsys.readouterr()
-    rows = [line for line in out.splitlines() if "-SMOKE-" in line or "DUP-001" in line]
-    assert len(rows) == len(demo_invoices())
-    assert any("PENDING_REVIEW" in row and "gpt-4.1-mini" in row for row in rows)
-    assert any("COMPLETED" in row and "AUTONOMOUS" in row for row in rows)
-    assert FakeOpenAI.calls > 0
-    assert fingerprint(source) == before
+    rows = table(out)
+    assert set(rows) == {invoice.invoice_id for invoice in demo_invoices().values()}
+    assert all(row["Status"] == row["Expected"] for row in rows.values()), rows
+    assert rows["INV-EXACT"]["Routed by"] == "autonomous"
+    assert rows["INV-SMALL"]["Status"] == "COMPLETED · APPROVE"
+    assert "material_variance" in rows["INV-LARGE"]["Routed by"]
+    assert rows["INV-LARGE"]["Model"] == "gpt-4.1-mini" and rows["INV-LARGE"]["Tokens"] != "—"
+    assert "Mode: fresh demo seed for each scenario" in out
+    assert "Base URL host: api.openai.com" in out
+    assert "Proxy variable set: no" in out
+    assert "10 of 10 match the expected outcome" in out
+    assert not (live / "untouched").exists()
     assert not secrets_in(out, err)
 
 
-def test_rejected_key_fails_the_run_without_revealing_the_key(source, monkeypatch, capsys, caplog):
-    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+def test_from_db_works_on_a_copy_and_warns_about_existing_reservations(source, capsys):
+    before = fingerprint(source)
+
+    assert load_script().main(["--from-db"]) == 0
+
+    out = capsys.readouterr().out
+    assert f"Mode: copy of {source}" in out
+    assert "WARNING: existing cases keep their PO reservations" in out
+    rows = table(out)
+    assert all("-SMOKE-" in invoice for invoice in rows if invoice != "DUP-001")
+    # The reserved PO lines push the second small-price invoice over the order quantity.
+    small = next(row for invoice, row in rows.items() if invoice.startswith("INV-SMALL"))
+    assert small["Status"] == "PENDING_REVIEW" != small["Expected"]
+    assert fingerprint(source) == before
+
+
+def test_base_url_host_and_proxy_names_are_shown_but_not_proxy_values(live, monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://proxy.example.com/v1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://user:pass@corp-proxy:3128")
+
+    assert load_script().main([]) == 0
+
+    out = capsys.readouterr().out
+    assert "Base URL host: proxy.example.com" in out
+    assert "Proxy variable set: yes (HTTPS_PROXY)" in out
+    assert "user:pass" not in out
+
+
+def test_invalid_base_url_stops_before_any_call(live, monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_BASE_URL", "proxy.example.com")
+
+    assert load_script().main([]) == 2
+
+    assert "OPENAI_BASE_URL is not a valid URL" in capsys.readouterr().err
+    assert FakeOpenAI.calls == 0
+
+
+def test_no_successful_model_call_fails_the_run(live, monkeypatch, capsys):
+    monkeypatch.setattr(FakeOpenAI, "mode", "timeout")
+
+    assert load_script().main([]) == 1
+
+    out = capsys.readouterr().out
+    assert "FAIL: no successful model call; the API was not reached." in out
+    assert "Model unavailable" in out
+
+
+def test_one_unavailable_case_is_reported_but_does_not_fail_the_run(live, monkeypatch, capsys):
+    monkeypatch.setattr(FakeOpenAI, "fail_invoices", frozenset({"INV-LARGE"}))
+
+    assert load_script().main([]) == 0
+
+    rows = table(capsys.readouterr().out)
+    assert rows["INV-LARGE"]["Status"] == "PENDING_REVIEW"
+    assert "model_error" in rows["INV-LARGE"]["Routed by"]
+    assert "Model unavailable" in rows["INV-LARGE"]["Error"]
+
+
+def test_rejected_key_fails_the_run_without_revealing_the_key(live, monkeypatch, capsys, caplog):
     monkeypatch.setattr(FakeOpenAI, "mode", "auth")
     caplog.set_level(logging.DEBUG)
 
     assert load_script().main([]) == 1
 
     out, err = capsys.readouterr()
-    assert "authentication" in out.lower()
+    assert "authentication failed" in table(out)["INV-LARGE"]["Error"]
     assert not secrets_in(out, err, caplog.text)
-    copy = Path(
-        next(line.split(": ", 1)[1] for line in out.splitlines() if line.startswith("Copy: "))
+    databases = Path(
+        next(line.split(": ", 1)[1] for line in out.splitlines() if line.startswith("Databases: "))
     )
-    with sqlite3.connect(copy) as connection:
+    with sqlite3.connect(databases / "03_large_price_variance" / "p2p.db") as connection:
         stored = " ".join(
             row[0] or "" for row in connection.execute("SELECT last_error FROM cases")
         )
@@ -139,19 +241,7 @@ def test_rejected_key_fails_the_run_without_revealing_the_key(source, monkeypatc
     assert not secrets_in(stored)
 
 
-def test_model_outage_is_reported_but_does_not_fail_the_run(source, monkeypatch, capsys):
-    monkeypatch.setenv("OPENAI_API_KEY", KEY)
-    monkeypatch.setattr(FakeOpenAI, "mode", "timeout")
-
-    assert load_script().main([]) == 0
-
-    out = capsys.readouterr().out
-    assert "Model unavailable" in out
-    assert "PENDING_REVIEW" in out
-
-
-def test_an_unhandled_exception_fails_the_run_and_the_rest_still_run(source, monkeypatch, capsys):
-    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+def test_an_unhandled_exception_fails_the_run_and_the_rest_still_run(live, monkeypatch, capsys):
     process = CaseService.process_invoice
 
     def broken_for_one(self, invoice, case_id=None):
@@ -163,6 +253,6 @@ def test_an_unhandled_exception_fails_the_run_and_the_rest_still_run(source, mon
 
     assert load_script().main([]) == 1
 
-    out = capsys.readouterr().out
-    assert "OSError: disk full" in out
-    assert "INV-HIGH" in out  # the last scenario still ran
+    rows = table(capsys.readouterr().out)
+    assert rows["INV-QTY"]["Error"] == "OSError: disk full"
+    assert rows["INV-HIGH"]["Status"] == "PENDING_REVIEW"  # the last scenario still ran

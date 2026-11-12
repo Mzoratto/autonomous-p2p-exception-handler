@@ -94,14 +94,18 @@ def show_failure(message: str, exc: Exception) -> None:
 SETUP_ERROR_KEY = "p2p_setup_error"
 
 
-def setup_screen(title: str) -> None:
-    """Replace the app with the two ways out of a live-mode configuration fault."""
+def setup_screen(title: str, fix: str | None = None) -> None:
+    """Replace the app with the ways out of a live-mode configuration fault."""
     with st.container(key="setup-screen"):
         st.title(title)
         st.markdown(
-            "The dashboard can't call the model with the current settings. Either:\n\n"
-            "1. Set a valid `OPENAI_API_KEY` in `.env.local` and restart the app, or\n"
-            "2. Set `DEMO_MODE=true` to run on the built-in mock model."
+            "The dashboard can't call the model with the current settings. "
+            + (
+                fix
+                or "Either:\n\n"
+                "1. Set a valid `OPENAI_API_KEY` in `.env.local` and restart the app, or\n"
+                "2. Set `DEMO_MODE=true` to run on the built-in mock model."
+            )
         )
         if st.session_state.get(SETUP_ERROR_KEY) == "auth":
             st.caption(
