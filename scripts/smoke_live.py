@@ -72,9 +72,10 @@ class RedactingFormatter(logging.Formatter):
 
 def copy_database(source: Path, target: Path) -> None:
     """Back up `source` to `target`; the source is only ever opened read-only."""
-    # The backup API gives a consistent copy, including pages still in the WAL file.
+    # The backup API gives a consistent copy, including pages still in the WAL file. as_uri()
+    # percent-encodes "#" and "?" in the path, which SQLite would read as URI delimiters.
     with (
-        sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True) as original,
+        sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True) as original,
         sqlite3.connect(target) as copy,
     ):
         original.backup(copy)

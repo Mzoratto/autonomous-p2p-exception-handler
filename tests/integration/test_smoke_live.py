@@ -125,7 +125,7 @@ def table(out: str) -> dict[str, dict[str, str]]:
 
 
 def fingerprint(path: Path) -> tuple[str, int]:
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+    with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True) as connection:
         cases = connection.execute("SELECT count(*) FROM cases").fetchone()[0]
     return hashlib.sha256(path.read_bytes()).hexdigest(), cases
 
@@ -177,6 +177,22 @@ def test_from_db_works_on_a_copy_and_warns_about_existing_reservations(source, c
     small = next(row for invoice, row in rows.items() if invoice.startswith("INV-SMALL"))
     assert small["Status"] == "PENDING_REVIEW" != small["Expected"]
     assert fingerprint(source) == before
+
+
+def test_from_db_copies_a_source_whose_path_contains_a_uri_delimiter(source, monkeypatch, capsys):
+    """A '#' in the path must not cut the SQLite URI short (wrong file, read-only flag lost)."""
+    moved = source.parent.parent / "snapshot#1" / "p2p.db"
+    moved.parent.mkdir()
+    source.rename(moved)
+    monkeypatch.setenv("P2P_DATABASE_URL", f"sqlite:///{moved}")
+    before = fingerprint(moved)
+
+    assert load_script().main(["--from-db"]) == 0
+
+    small = next(row for inv, row in table(capsys.readouterr().out).items() if "INV-SMALL" in inv)
+    assert small["Status"] == "PENDING_REVIEW"  # the reservations came from the requested file
+    assert fingerprint(moved) == before
+    assert not (source.parent.parent / "snapshot").exists()
 
 
 def test_from_db_needs_the_requested_database_to_exist(live, monkeypatch, capsys):

@@ -216,8 +216,9 @@ def _number(name: str, default: str, kind: type, minimum: float, unit: str) -> f
 def _is_http_url(value: str) -> bool:
     try:
         parts = urlsplit(value)
+        parts.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
         return parts.scheme in {"http", "https"} and bool(parts.hostname)
-    except ValueError:  # e.g. an unmatched "[" in an IPv6 host
+    except ValueError:  # e.g. an unmatched "[" in an IPv6 host, or port "abc" / 99999
         return False
 
 

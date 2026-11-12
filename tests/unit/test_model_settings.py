@@ -28,7 +28,16 @@ def test_valid_base_url_is_used(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "url", ["not a url", "ftp://example.com/v1", "https://", "example.com/v1", "https://[::1"]
+    "url",
+    [
+        "not a url",
+        "ftp://example.com/v1",
+        "https://",
+        "example.com/v1",
+        "https://[::1",
+        "https://proxy.example.com:abc/v1",
+        "https://proxy.example.com:99999/v1",
+    ],
 )
 def test_invalid_base_url_is_a_configuration_error(monkeypatch, url):
     monkeypatch.setenv("OPENAI_BASE_URL", url)
