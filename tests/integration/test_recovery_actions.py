@@ -165,6 +165,62 @@ def test_a_retry_whose_case_cannot_be_reloaded_reports_it(database_url, monkeypa
     ]
 
 
+def test_retry_applies_only_the_confirmed_review_that_is_stored(database_url, monkeypatch):
+    """#8: Retry applies the stored submission unchanged; it never takes a new decision."""
+    case_id = failed_review_run(database_url, monkeypatch)
+    submitted = stored_case(database_url, case_id)["submitted_review"]
+    at = open_page("cases", case=case_id)
+
+    at.button(key=f"retry_{case_id}").click().run()
+
+    assert not at.exception
+    case = stored_case(database_url, case_id)
+    assert case["submitted_review"] == submitted
+    assert {key: case["state"]["human_review"][key] for key in submitted} == submitted
+    assert (case["state"]["outcome"]["action"], case["state"]["outcome"]["source"]) == (
+        "REJECT",
+        "HUMAN_OVERRIDDEN",
+    )
+
+
+def test_a_pending_case_without_a_confirmed_review_offers_no_retry(database_url):
+    """#8: with no stored review, nothing exists for Retry to apply; the case stays pending."""
+    runtime = create_runtime(database_url=database_url, demo_mode=True)
+    try:
+        app = CaseService(runtime)
+        case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
+        runtime.repository.record_error(case_id, "OSError: disk full")
+    finally:
+        runtime.close()
+    before = stored_case(database_url, case_id)
+
+    at = open_page("cases", case=case_id)
+
+    assert not at.exception
+    assert f"retry_{case_id}" not in {button.key for button in at.button}
+    after = stored_case(database_url, case_id)
+    assert (after["status"], after["checkpoint_id"]) == ("PENDING_REVIEW", before["checkpoint_id"])
+    assert after["submitted_review"] is None
+    assert after["state"].get("human_review") is None
+    assert after["state"].get("outcome") is None
+
+
+def test_retry_of_a_failed_processing_run_reprocesses_without_a_decision(database_url):
+    """#8: with no stored review, Retry reprocesses; the case returns to review undecided."""
+    case_id = failed_processing(database_url)
+    at = open_page("cases", case=case_id)
+    assert not any("already submitted" in warning.value for warning in at.warning)
+
+    at.button(key=f"retry_{case_id}").click().run()
+
+    assert not at.exception
+    case = stored_case(database_url, case_id)
+    assert (case["status"], case["last_error"]) == ("PENDING_REVIEW", None)
+    assert case["submitted_review"] is None
+    assert case["state"].get("human_review") is None
+    assert case["state"].get("outcome") is None
+
+
 def test_a_refused_review_shows_and_logs_the_reason(database_url, caplog):
     """#18: a review refused before the workflow runs names the refusal and is logged."""
     runtime = create_runtime(database_url=database_url, demo_mode=True)
