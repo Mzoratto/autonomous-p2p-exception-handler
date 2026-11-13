@@ -155,7 +155,7 @@ Read from the process environment, then `.env.local`, then `.env` (an existing v
 | `P2P_DATABASE_URL` | `sqlite:///data/demo/p2p.db` | SQLite file for cases, audit events and checkpoints; must be a `sqlite:///` file path without query options |
 | `P2P_RULES_PATH` | `config/business_rules.yaml` in the project | Business rules file |
 | `P2P_REVIEWER_NAME` | `Demo Reviewer` | Name that signs human reviews; its initials appear in the top bar |
-| `P2P_LOG_LEVEL` | `INFO` | Log level for the `p2p` loggers (standard error) |
+| `P2P_LOG_LEVEL` | `INFO` | Log level for the `p2p` loggers (standard error): `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`; any other value stops the dashboard with an error naming the setting |
 
 ## Run with Docker
 
@@ -164,6 +164,8 @@ docker compose up --build
 ```
 
 The dashboard is available at <http://localhost:8501>. Compose binds the unauthenticated dashboard to host loopback only. The image does not copy local credential files.
+
+Compose passes the settings from [Environment variables](#environment-variables) to the container, taking them from the shell environment and from a `.env` file next to `docker-compose.yml` (Compose does not read `.env.local`). `P2P_DATABASE_URL` and `P2P_RULES_PATH` are fixed to the paths inside the image.
 
 - **Base images:** Python 3.11.18 (slim, Debian bookworm) and uv 0.11.29, both pinned by version and digest.
 - **User:** the app runs as the unprivileged user `app` (uid 10001). Only `/app/data` is writable; it holds the database, checkpoints, WAL files and the command lock file.
