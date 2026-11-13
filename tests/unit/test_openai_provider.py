@@ -124,9 +124,14 @@ def test_exhausted_quota_is_reported_as_an_outage_with_its_reason(provider):
         openai.PermissionDeniedError(
             "no access to model", response=httpx.Response(403, request=REQUEST), body=None
         ),
+        openai.NotFoundError(
+            "The model `gpt-test` does not exist or you do not have access to it.",
+            response=httpx.Response(404, request=REQUEST),
+            body={"code": "model_not_found"},
+        ),
     ],
 )
-def test_rejected_credentials_are_a_configuration_fault_not_an_outage(provider, error):
+def test_rejected_credentials_or_an_unknown_model_are_a_configuration_fault(provider, error):
     with_outcome(provider, error)
 
     with pytest.raises(ModelAuthenticationError):
