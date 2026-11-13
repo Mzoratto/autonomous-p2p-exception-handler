@@ -90,11 +90,20 @@ class RecordingLock:
 
 def test_reads_only_try_the_command_lock_and_never_wait_for_it(app, monkeypatch):
     """A read that waits a bounded time, say `acquire(timeout=3)`, still returns while the holder
-    has the lock, so the test above misses it. Here every read must ask without waiting."""
+    has the lock, so the test above misses it. Here each read's try must ask once, without
+    waiting: no timeout and no retries."""
     case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
-    _, lock_file = app.runtime.repository._lock_path()
+    repository = app.runtime.repository
+    _, lock_file = repository._lock_path()
     lock = RecordingLock()
     monkeypatch.setitem(_LOCKS, lock_file.removesuffix(".commands.lock"), lock)
+    try_lock, tries = repository.try_command_lock, []
+
+    def counted_try_lock():
+        tries.append(1)
+        return try_lock()
+
+    monkeypatch.setattr(repository, "try_command_lock", counted_try_lock)
 
     with command_running(app):
         app.refresh_open_cases()
@@ -105,7 +114,8 @@ def test_reads_only_try_the_command_lock_and_never_wait_for_it(app, monkeypatch)
     reads = [(blocking, timeout) for ident, blocking, timeout in lock.requests if ident == reader]
     holds = [(blocking, timeout) for ident, blocking, timeout in lock.requests if ident != reader]
     assert holds == [(True, -1)], "the lock under test is not the one the command takes"
-    assert reads == [(False, -1), (False, -1)], "a read asked to wait for the command lock"
+    assert len(tries) >= 2, "refresh_open_cases and get_case each try the lock"
+    assert reads == [(False, -1)] * len(tries), "a read asked to wait for the command lock"
 
 
 def test_review_page_waits_for_a_busy_case_instead_of_offering_a_decision(tmp_path, monkeypatch):
