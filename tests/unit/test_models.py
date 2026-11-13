@@ -15,6 +15,17 @@ def test_invoice_rejects_inconsistent_totals():
         Invoice.model_validate(payload)
 
 
+def test_invoice_rejects_an_amount_too_large_for_cents():
+    """Rounding 1e30 to cents exceeds Decimal precision; it must be a ValidationError."""
+    from p2p.domain.models import Invoice
+
+    payload = demo_invoices()["01_exact_match"].model_dump(mode="json")
+    payload["line_items"][0].update(unit_price="1e30", line_total="1e31")
+    payload.update(subtotal="1e31", total="1e31")
+    with pytest.raises(ValidationError, match="too large"):
+        Invoice.model_validate(payload)
+
+
 def test_ingestion_normalizes_currency_and_identifiers():
     payload = deepcopy(demo_invoices()["01_exact_match"].model_dump(mode="json"))
     payload["currency"] = "eur"

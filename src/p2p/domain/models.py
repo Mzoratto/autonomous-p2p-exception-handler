@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -9,6 +9,14 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MONEY = Decimal("0.01")
+
+
+def to_cents(amount: Decimal) -> Decimal:
+    """Round to cents; an amount too large to round exactly is a field error, not a crash."""
+    try:
+        return amount.quantize(MONEY, rounding=ROUND_HALF_EVEN)
+    except InvalidOperation:
+        raise ValueError(f"amount {amount} is too large") from None
 
 
 class DecisionType(StrEnum):
@@ -57,8 +65,8 @@ class InvoiceLine(BaseModel):
 
     @model_validator(mode="after")
     def validate_line_total(self) -> InvoiceLine:
-        expected = (self.quantity * self.unit_price).quantize(MONEY, rounding=ROUND_HALF_EVEN)
-        if self.line_total.quantize(MONEY, rounding=ROUND_HALF_EVEN) != expected:
+        expected = to_cents(self.quantity * self.unit_price)
+        if to_cents(self.line_total) != expected:
             raise ValueError(f"line_total must equal quantity × unit_price ({expected})")
         return self
 
@@ -85,13 +93,9 @@ class Invoice(BaseModel):
         self.supplier_id = self.supplier_id.upper()
         self.po_number = self.po_number.upper() if self.po_number else None
         lines_total = sum((line.line_total for line in self.line_items), Decimal("0"))
-        if self.subtotal.quantize(MONEY, rounding=ROUND_HALF_EVEN) != lines_total.quantize(
-            MONEY, rounding=ROUND_HALF_EVEN
-        ):
+        if to_cents(self.subtotal) != to_cents(lines_total):
             raise ValueError("subtotal does not equal the sum of line totals")
-        if self.total.quantize(MONEY, rounding=ROUND_HALF_EVEN) != (
-            self.subtotal + self.tax
-        ).quantize(MONEY, rounding=ROUND_HALF_EVEN):
+        if to_cents(self.total) != to_cents(self.subtotal + self.tax):
             raise ValueError("total does not equal subtotal plus tax")
         return self
 
