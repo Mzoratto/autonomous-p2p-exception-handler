@@ -219,16 +219,44 @@ def test_the_process_result_reports_a_case_that_cannot_be_reconciled(database_ur
     ]
 
 
-def test_an_amount_too_large_for_cents_is_a_field_error_on_upload(database_url):
-    """#13: 1e30 overflows exact-cent rounding; the page must list it as a field error."""
+def invoice_payload(quantity: str, unit_price: str, line_total: str) -> dict:
     payload = demo_invoices()["01_exact_match"].model_dump(mode="json")
-    payload["line_items"][0].update(unit_price="1e30", line_total="1e31")
-    payload.update(subtotal="1e31", total="1e31")
+    payload["line_items"][0].update(quantity=quantity, unit_price=unit_price, line_total=line_total)
+    payload.update(subtotal=line_total, total=line_total)
+    return payload
+
+
+OUT_OF_BOUNDS = [
+    pytest.param(("10", "1e30", "1e31"), id="#13: 1e30 overflows exact-cent rounding"),
+    pytest.param(("10", "1e999999", "0"), id="review 1: quantity x unit price overflows"),
+    pytest.param(("1e-30", "1e30", "1"), id="review 2: unit price too large for cents"),
+]
+
+
+@pytest.mark.parametrize("line", OUT_OF_BOUNDS)
+def test_an_amount_out_of_bounds_is_a_field_error_on_upload(database_url, line):
+    """#13: an amount too large or too precise must be listed as a field error, not crash."""
     at = open_page("process")
 
-    at.text_area(key="process_paste").set_value(json.dumps(payload)).run()
+    at.text_area(key="process_paste").set_value(json.dumps(invoice_payload(*line))).run()
     at.button(key="process_validate").click().run()
 
     assert not at.exception
     assert any("need fixing" in error.value for error in at.error)
     assert "line_items[0]" in "".join(element.proto.body for element in at.get("html"))
+
+
+def test_a_unit_price_too_large_for_cents_cannot_be_run_or_stored(database_url):
+    """#13 (review 2): it used to validate, run, and then crash the Cases and Review detail."""
+    at = open_page("process")
+
+    payload = invoice_payload("1e-30", "1e30", "1")
+    at.text_area(key="process_paste").set_value(json.dumps(payload)).run()
+    at.button(key="process_validate").click().run()
+
+    assert "process_run" not in {button.key for button in at.button}
+    runtime = create_runtime(database_url=database_url, demo_mode=True)
+    try:
+        assert CaseService(runtime).query_cases()[0] == []
+    finally:
+        runtime.close()

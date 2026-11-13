@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -10,13 +10,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MONEY = Decimal("0.01")
 
+# Bounds keep every product, sum and cent rounding inside the default 28-digit Decimal context,
+# so an out-of-range amount is a field error instead of an Overflow or InvalidOperation later.
+# Quantity: up to 999,999,999.999999 units; unit price: up to 999,999,999,999.999999;
+# money: up to 999,999,999,999,999.999999. Six decimals cover fractional units and sub-cent prices.
+QUANTITY_DIGITS = 15
+UNIT_PRICE_DIGITS = 18
+MONEY_DIGITS = 21
+DECIMAL_PLACES = 6
+
 
 def to_cents(amount: Decimal) -> Decimal:
-    """Round to cents; an amount too large to round exactly is a field error, not a crash."""
-    try:
-        return amount.quantize(MONEY, rounding=ROUND_HALF_EVEN)
-    except InvalidOperation:
-        raise ValueError(f"amount {amount} is too large") from None
+    return amount.quantize(MONEY, rounding=ROUND_HALF_EVEN)
 
 
 class DecisionType(StrEnum):
@@ -59,9 +64,9 @@ class InvoiceLine(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     line_id: str = Field(min_length=1)
     description: str
-    quantity: Decimal = Field(gt=0)
-    unit_price: Decimal = Field(ge=0)
-    line_total: Decimal = Field(ge=0)
+    quantity: Decimal = Field(gt=0, max_digits=QUANTITY_DIGITS, decimal_places=DECIMAL_PLACES)
+    unit_price: Decimal = Field(ge=0, max_digits=UNIT_PRICE_DIGITS, decimal_places=DECIMAL_PLACES)
+    line_total: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
 
     @model_validator(mode="after")
     def validate_line_total(self) -> InvoiceLine:
@@ -80,9 +85,9 @@ class Invoice(BaseModel):
     invoice_date: date
     currency: str = Field(min_length=3, max_length=3)
     line_items: list[InvoiceLine] = Field(min_length=1)
-    subtotal: Decimal = Field(ge=0)
-    tax: Decimal = Field(ge=0)
-    total: Decimal = Field(ge=0)
+    subtotal: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
+    tax: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
+    total: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
 
     @model_validator(mode="after")
     def normalize_and_validate(self) -> Invoice:
