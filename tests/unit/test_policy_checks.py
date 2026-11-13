@@ -118,6 +118,34 @@ def test_every_discrepancy_type_fails_a_check(rules, kind):
     assert failing(result)
 
 
+# A duplicate is rejected by its own rule before the allowlist is reached.
+MINOR_NON_PRICE = [
+    kind
+    for kind in DiscrepancyType
+    if kind not in {DiscrepancyType.PRICE_VARIANCE, DiscrepancyType.DUPLICATE_INVOICE}
+]
+
+
+@pytest.mark.parametrize("severity", [Severity.INFO, Severity.WARNING])
+@pytest.mark.parametrize("kind", MINOR_NON_PRICE)
+def test_only_a_minor_price_variance_passes_the_autonomous_allowlist(rules, kind, severity):
+    """A matched result with any other minor discrepancy still needs a reviewer."""
+    match = MatchResult(
+        matched=True,
+        summary="matched",
+        discrepancies=[Discrepancy(type=kind, severity=severity, explanation="probe")],
+    )
+
+    result = DecisionPolicy(rules).evaluate(
+        demo_invoices()["01_exact_match"],
+        match,
+        Resolution(action=DecisionType.APPROVE, rationale="Confident approval", confidence=1),
+    )
+
+    assert (result.permitted, result.requires_human_review) == (False, True)
+    assert "deterministic_eligibility" in result.triggered_rules
+
+
 def test_unmatched_result_without_a_typed_failure_fails_document_consistency(rules):
     match = MatchResult(matched=False, summary="incomplete", discrepancies=[])
 

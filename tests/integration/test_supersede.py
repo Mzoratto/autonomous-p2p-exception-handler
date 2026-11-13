@@ -467,6 +467,8 @@ def test_process_page_supersedes_the_held_case_after_a_note_and_a_confirmation(d
         "APPROVE",
         "AUTONOMOUS",
     )
+    [supersedes] = events(new, "SUPERSEDES_CASE")
+    assert supersedes["data"]["reviewer"] == "Ana Reviewer"  # P2P_REVIEWER_NAME, see database_url
     assert any(f"Supersedes {held_id}" in message.value for message in at.info)
     # The held case is now superseded; the page must not keep offering to correct it.
     assert "supersedes" not in at.query_params

@@ -99,7 +99,8 @@ def test_processing_exact_match_completes_autonomously(database_url, at):
     assert case["state"]["outcome"]["source"] == "AUTONOMOUS"
 
 
-def test_review_requires_a_choice_a_note_and_a_confirmation(database_url, at):
+def test_review_requires_a_choice_a_note_and_a_confirmation(database_url, at, monkeypatch):
+    monkeypatch.setenv("P2P_REVIEWER_NAME", REVIEWER)
     case_id = run_scenario(at, "03")
     at.button(key="process_open_case").click().run()
     assert f"review_decision_{case_id}" in keys(at.radio)
@@ -123,8 +124,10 @@ def test_review_requires_a_choice_a_note_and_a_confirmation(database_url, at):
     at.button(key="review_confirm_button").click().run()
 
     assert not at.exception
-    outcome = stored_case(database_url, case_id)["state"]["outcome"]
+    case = stored_case(database_url, case_id)
+    outcome, review = case["state"]["outcome"], case["state"]["human_review"]
     assert (outcome["action"], outcome["source"]) == ("REJECT", "HUMAN_OVERRIDDEN")
+    assert (review["reviewer"], review["comment"]) == (REVIEWER, "dup")
     assert at.toast[0].value == "Reject recorded for INV-LARGE · 0 left in queue"
 
 
