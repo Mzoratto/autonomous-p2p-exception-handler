@@ -473,26 +473,8 @@ def test_process_page_supersedes_the_held_case_after_a_note_and_a_confirmation(d
     assert "process_supersedes" not in at.session_state
 
 
-def test_correcting_a_held_case_after_an_earlier_run_starts_a_new_flow_with_the_link(database_url):
-    """The Cases button once reopened the earlier result; "Process another" then lost the link."""
-    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
-    at.switch_page(f"{PAGES}/process.py").run()
-    at.button(key="scenario_select_03").click().run()
-    at.button(key="process_run").click().run()
-    held_id = at.session_state["process_case_id"]
-    with_service(
-        database_url,
-        lambda app: app.review_case(
-            held_id,
-            HumanReview(
-                reviewer="Ana Reviewer",
-                action=DecisionType.REQUEST_INFO,
-                comment="Send the PO amendment",
-            ),
-        ),
-    )
-
-    # Same session, entering as "Process corrected invoice" does (cases.py: switch_to).
+def enter_correction_and_supersede(at: AppTest, database_url: str, held_id: str) -> None:
+    """Enter as "Process corrected invoice" does (cases.py: switch_to) and link the correction."""
     at.query_params["supersedes"] = held_id
     at.switch_page(f"{PAGES}/process.py").run()
 
@@ -515,6 +497,42 @@ def test_correcting_a_held_case_after_an_earlier_run_starts_a_new_flow_with_the_
     assert held["superseded_by"] == new_id
     kinds = {item["type"] for item in new["state"]["match_result"]["discrepancies"]}
     assert not kinds & {"QUANTITY_EXCEEDS_ORDER", "QUANTITY_EXCEEDS_RECEIPT"}
+
+
+def test_correcting_a_held_case_after_an_earlier_run_starts_a_new_flow_with_the_link(database_url):
+    """The Cases button once reopened the earlier result; "Process another" then lost the link."""
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15).run()
+    at.switch_page(f"{PAGES}/process.py").run()
+    at.button(key="scenario_select_03").click().run()
+    at.button(key="process_run").click().run()
+    held_id = at.session_state["process_case_id"]
+    with_service(
+        database_url,
+        lambda app: app.review_case(
+            held_id,
+            HumanReview(
+                reviewer="Ana Reviewer",
+                action=DecisionType.REQUEST_INFO,
+                comment="Send the PO amendment",
+            ),
+        ),
+    )
+
+    enter_correction_and_supersede(at, database_url, held_id)
+
+
+def test_correcting_the_same_held_case_again_after_a_plain_run_starts_a_new_flow(database_url):
+    """A plain run inside a pending correction once kept the link, so re-entry reopened it."""
+    held_id = with_service(database_url, hold)
+    at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15)
+    at.query_params["supersedes"] = held_id
+    at.run()
+    at.switch_page(f"{PAGES}/process.py").run()
+    at.button(key="scenario_select_01").click().run()
+    at.button(key="process_run").click().run()
+    assert "process_another" in keys(at.button)  # the plain run's result
+
+    enter_correction_and_supersede(at, database_url, held_id)
 
 
 def test_cancel_closes_the_supersede_confirmation_without_a_link(database_url):

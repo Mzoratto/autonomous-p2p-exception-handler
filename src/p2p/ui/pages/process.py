@@ -183,10 +183,10 @@ def run(invoice: Invoice, supersede: SupersedeRequest | None = None) -> None:
         process_is_replay=result["is_replay"],
         process_step=2,
     )
-    if supersede is not None:
-        # The held case is superseded now; stop offering to correct it.
-        st.session_state.pop("process_supersedes", None)
-        st.query_params.pop("supersedes", None)
+    # The run is over: a superseded held case is no longer offered, and after a plain run the next
+    # "Process corrected invoice" starts a new flow instead of reopening this result.
+    st.session_state.pop("process_supersedes", None)
+    st.query_params.pop("supersedes", None)
     st.rerun()
 
 
