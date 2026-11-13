@@ -10,45 +10,44 @@ from p2p.application.service import CaseService, create_runtime
 from p2p.domain.config import BusinessRules
 
 # The app's default database, relative to the working directory: a developer's demo database
-# when the suite runs from a checkout. The suite must leave these files exactly as it found them.
-DEFAULT_DATABASE_FILES = "data/demo/p2p.db*"
-FileState = tuple[int, int, str]
-_BEFORE = pytest.StashKey[dict[str, FileState]]()
+# when the suite runs from a checkout. The suite must leave it exactly as it found it.
+# Only the database file itself is watched. SQLite creates and removes its -wal and -shm files
+# whenever another process opens or closes the database, and a running app's first command
+# creates p2p.db.commands.lock next to a database seeded with `make seed`.
+DEFAULT_DATABASE = "data/demo/p2p.db"
+FileState = tuple[int, int, str] | None
+_BEFORE = pytest.StashKey[FileState]()
 
 
-def _default_database_files() -> dict[str, FileState]:
-    states = {}
-    for path in sorted(Path.cwd().glob(DEFAULT_DATABASE_FILES)):
-        if path.is_file():
-            stat = path.stat()
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            states[str(path)] = (stat.st_size, stat.st_mtime_ns, digest)
-    return states
+def _default_database_state() -> FileState:
+    path = Path.cwd() / DEFAULT_DATABASE
+    if not path.is_file():
+        return None
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def pytest_sessionstart(session):
-    session.config.stash[_BEFORE] = _default_database_files()
+    session.config.stash[_BEFORE] = _default_database_state()
 
 
 def pytest_sessionfinish(session):
-    """Fail the run if it created, changed or removed any of the default database files."""
-    before = session.config.stash.get(_BEFORE, {})
-    after = _default_database_files()
-    touched = sorted(
-        path for path in before.keys() | after.keys() if before.get(path) != after.get(path)
-    )
-    if not touched:
+    """Fail the run if the default database file was created, changed or removed during it."""
+    before = session.config.stash.get(_BEFORE, None)
+    after = _default_database_state()
+    if before == after:
         return
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
+        change = "created" if before is None else "removed" if after is None else "modified"
         reporter.write("\n")
-        reporter.write_sep("=", "the test session touched the default database", red=True)
-        for path in touched:
-            change = (
-                "created" if path not in before else "removed" if path not in after else "modified"
-            )
-            reporter.write_line(f"{change}: {path}")
+        reporter.write_sep("=", "the default database changed during the test session", red=True)
+        reporter.write_line(f"{change}: {Path.cwd() / DEFAULT_DATABASE}")
+        reporter.write_line(
+            "Either the suite wrote to it, or another process did: an app running on the same "
+            "database may be the writer."
+        )
 
 
 @pytest.fixture(scope="session", autouse=True)
