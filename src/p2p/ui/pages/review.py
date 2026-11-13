@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import streamlit as st
@@ -19,6 +20,8 @@ from p2p.ui.viewmodels import (
     parse_timestamp,
     severity_chip,
 )
+
+logger = logging.getLogger("p2p.ui")
 
 DECISIONS = [DecisionType.APPROVE, DecisionType.REQUEST_INFO, DecisionType.REJECT]
 DECISION_CAPTIONS = {
@@ -155,10 +158,12 @@ def confirm_dialog(case: dict, app) -> None:
 def apply_review(case: dict, app, review: HumanReview, checkpoint_id: str | None) -> None:
     try:
         app.review_case(case["case_id"], review, checkpoint_id=checkpoint_id)
-    except Exception:
+    except Exception as exc:
+        logger.exception("Review of %s could not be applied", case["case_id"])
         st.session_state["flash"] = {
             "kind": "error",
             "text": "The review could not be applied. Reload the case and try again.",
+            "exception": exc,
         }
         st.rerun()
     remaining = pending_queue(app)

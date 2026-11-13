@@ -76,6 +76,8 @@ def render_flash() -> None:
         return
     if flash["kind"] == "toast":
         st.toast(flash["text"], icon=":material/check_circle:")
+    elif "exception" in flash:
+        show_failure(flash["text"], flash["exception"])
     else:
         st.error(flash["text"])
 
@@ -104,14 +106,17 @@ def setup_screen(title: str, fix: str | None = None) -> NoReturn:
             + (
                 fix
                 or "Either:\n\n"
-                "1. Set a valid `OPENAI_API_KEY` in `.env.local` and restart the app, or\n"
+                "1. Fix the live-mode settings in `.env.local` and restart the app: a valid "
+                "`OPENAI_API_KEY`, an `OPENAI_MODEL` that key can use, and an `OPENAI_BASE_URL` "
+                "that serves that model, or\n"
                 "2. Set `DEMO_MODE=true` to run on the built-in mock model."
             )
         )
         if st.session_state.get(SETUP_ERROR_KEY) == "auth":
             st.caption(
-                "While a case was being processed, the model service rejected the key or "
-                "denied it access to the configured model."
+                "While a case was being processed, the model service rejected the key, denied it "
+                "access to the configured model, or did not find the model (check `OPENAI_MODEL` "
+                "and `OPENAI_BASE_URL`)."
             )
             if st.button("Try again", type="primary", key="setup_try_again"):
                 st.session_state.pop(SETUP_ERROR_KEY, None)

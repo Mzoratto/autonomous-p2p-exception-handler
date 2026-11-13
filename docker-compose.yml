@@ -8,8 +8,12 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-30}
+      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-1}
       P2P_DATABASE_URL: sqlite:////app/data/demo/p2p.db
       P2P_RULES_PATH: /app/config/business_rules.yaml
+      P2P_REVIEWER_NAME: ${P2P_REVIEWER_NAME:-Demo Reviewer}
+      P2P_LOG_LEVEL: ${P2P_LOG_LEVEL:-INFO}
     volumes:
       - p2p-data:/app/data/demo
 

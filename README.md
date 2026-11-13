@@ -136,7 +136,7 @@ The timeout, retry and endpoint settings are listed under [Environment variables
 
 Requests are sent with `store=False`. Each AI audit event records the model, response id, token counts and latency of the call.
 
-When the model service cannot be reached (timeout, connection error, rate limit, server error, or an exhausted quota), the workflow stops asking the model, records the failure and sends the case to a reviewer; the reviewer sees "Model unavailable" and the reason. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
+When the model service cannot be reached (timeout, connection error, rate limit, server error, or an exhausted quota), the workflow stops asking the model, records the failure and sends the case to a reviewer; the reviewer sees "Model unavailable" and the reason. A rejected API key, a key without access to the configured model, or a model the service does not find (a 404, usually a mistyped `OPENAI_MODEL` or an `OPENAI_BASE_URL` with the wrong path) is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen that names `OPENAI_API_KEY`, `OPENAI_MODEL` and `OPENAI_BASE_URL`. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
 
 Never commit a real API key. `.env.local` is ignored by Git.
 
@@ -155,7 +155,7 @@ Read from the process environment, then `.env.local`, then `.env` (an existing v
 | `P2P_DATABASE_URL` | `sqlite:///data/demo/p2p.db` | SQLite file for cases, audit events and checkpoints; must be a `sqlite:///` file path without query options |
 | `P2P_RULES_PATH` | `config/business_rules.yaml` in the project | Business rules file |
 | `P2P_REVIEWER_NAME` | `Demo Reviewer` | Name that signs human reviews; its initials appear in the top bar |
-| `P2P_LOG_LEVEL` | `INFO` | Log level for the `p2p` loggers (standard error) |
+| `P2P_LOG_LEVEL` | `INFO` | Log level for the `p2p` loggers (standard error): `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`; any other value stops the dashboard with an error naming the setting |
 
 ## Run with Docker
 
@@ -164,6 +164,8 @@ docker compose up --build
 ```
 
 The dashboard is available at <http://localhost:8501>. Compose binds the unauthenticated dashboard to host loopback only. The image does not copy local credential files.
+
+Compose passes the settings from [Environment variables](#environment-variables) to the container, taking them from the shell environment and from a `.env` file next to `docker-compose.yml` (Compose does not read `.env.local`). `P2P_DATABASE_URL` and `P2P_RULES_PATH` are fixed to the paths inside the image.
 
 - **Base images:** Python 3.11.18 (slim, Debian bookworm) and uv 0.11.29, both pinned by version and digest.
 - **User:** the app runs as the unprivileged user `app` (uid 10001). Only `/app/data` is writable; it holds the database, checkpoints, WAL files and the command lock file.
@@ -244,7 +246,7 @@ Threshold comparisons retain Decimal precision. Monetary totals use two decimal 
 
 Operational thresholds live in [`config/business_rules.yaml`](config/business_rules.yaml).
 
-Duplicate rejection and missing-document review switches must remain true; startup rejects unsafe combinations.
+Duplicate rejection and missing-document review switches must remain true; startup rejects unsafe combinations. Startup also rejects unknown or misspelled keys (for example `reflection.max_iteration`) and names each one in the error, so remove keys the current version does not declare before upgrading.
 
 This includes price and quantity tolerances, confidence gates, high-value review rules, duplicate handling, missing-document controls, the reflection limit, and the review target (`review.sla_hours`, default 24) drawn on the Overview's waiting chart.
 

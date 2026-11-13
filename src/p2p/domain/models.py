@@ -10,6 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MONEY = Decimal("0.01")
 
+# Bounds keep every product, sum and cent rounding inside the default 28-digit Decimal context,
+# so an out-of-range amount is a field error instead of an Overflow or InvalidOperation later.
+# Quantity: up to 999,999,999.999999 units; unit price: up to 999,999,999,999.999999;
+# money: up to 999,999,999,999,999.999999. Six decimals cover fractional units and sub-cent prices.
+QUANTITY_DIGITS = 15
+UNIT_PRICE_DIGITS = 18
+MONEY_DIGITS = 21
+DECIMAL_PLACES = 6
+
+
+def to_cents(amount: Decimal) -> Decimal:
+    return amount.quantize(MONEY, rounding=ROUND_HALF_EVEN)
+
 
 class DecisionType(StrEnum):
     APPROVE = "APPROVE"
@@ -51,14 +64,14 @@ class InvoiceLine(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     line_id: str = Field(min_length=1)
     description: str
-    quantity: Decimal = Field(gt=0)
-    unit_price: Decimal = Field(ge=0)
-    line_total: Decimal = Field(ge=0)
+    quantity: Decimal = Field(gt=0, max_digits=QUANTITY_DIGITS, decimal_places=DECIMAL_PLACES)
+    unit_price: Decimal = Field(ge=0, max_digits=UNIT_PRICE_DIGITS, decimal_places=DECIMAL_PLACES)
+    line_total: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
 
     @model_validator(mode="after")
     def validate_line_total(self) -> InvoiceLine:
-        expected = (self.quantity * self.unit_price).quantize(MONEY, rounding=ROUND_HALF_EVEN)
-        if self.line_total.quantize(MONEY, rounding=ROUND_HALF_EVEN) != expected:
+        expected = to_cents(self.quantity * self.unit_price)
+        if to_cents(self.line_total) != expected:
             raise ValueError(f"line_total must equal quantity × unit_price ({expected})")
         return self
 
@@ -72,9 +85,9 @@ class Invoice(BaseModel):
     invoice_date: date
     currency: str = Field(min_length=3, max_length=3)
     line_items: list[InvoiceLine] = Field(min_length=1)
-    subtotal: Decimal = Field(ge=0)
-    tax: Decimal = Field(ge=0)
-    total: Decimal = Field(ge=0)
+    subtotal: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
+    tax: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
+    total: Decimal = Field(ge=0, max_digits=MONEY_DIGITS, decimal_places=DECIMAL_PLACES)
 
     @model_validator(mode="after")
     def normalize_and_validate(self) -> Invoice:
@@ -85,13 +98,9 @@ class Invoice(BaseModel):
         self.supplier_id = self.supplier_id.upper()
         self.po_number = self.po_number.upper() if self.po_number else None
         lines_total = sum((line.line_total for line in self.line_items), Decimal("0"))
-        if self.subtotal.quantize(MONEY, rounding=ROUND_HALF_EVEN) != lines_total.quantize(
-            MONEY, rounding=ROUND_HALF_EVEN
-        ):
+        if to_cents(self.subtotal) != to_cents(lines_total):
             raise ValueError("subtotal does not equal the sum of line totals")
-        if self.total.quantize(MONEY, rounding=ROUND_HALF_EVEN) != (
-            self.subtotal + self.tax
-        ).quantize(MONEY, rounding=ROUND_HALF_EVEN):
+        if to_cents(self.total) != to_cents(self.subtotal + self.tax):
             raise ValueError("total does not equal subtotal plus tax")
         return self
 

@@ -73,8 +73,11 @@ logger = logging.getLogger("p2p.service")
 
 
 def _value_by_currency(rows: list[dict]) -> dict[str, str]:
+    """Sum stored totals by currency; a row the migration could not read has no total."""
     totals: dict[str, Decimal] = {}
     for row in rows:
+        if row["total"] is None:
+            continue
         totals[row["currency"]] = totals.get(row["currency"], Decimal("0")) + Decimal(row["total"])
     return {currency: f"{amount:.2f}" for currency, amount in sorted(totals.items())}
 
@@ -118,6 +121,12 @@ class Runtime:
             self.checkpoint_connection.close()
 
 
+def load_env_files() -> None:
+    """Fill unset variables from `.env.local`, then `.env`; the process environment wins."""
+    load_dotenv(".env.local")
+    load_dotenv(".env")
+
+
 def create_runtime(
     database_url: str | None = None,
     demo_mode: bool | None = None,
@@ -125,8 +134,7 @@ def create_runtime(
     auto_seed: bool = True,
     rules_path: str | Path | None = None,
 ) -> Runtime:
-    load_dotenv(".env.local")
-    load_dotenv(".env")
+    load_env_files()
     url = database_url or os.getenv("P2P_DATABASE_URL", "sqlite:///data/demo/p2p.db")
     resolved_rules_path = resolve_rules_path(rules_path)
     rules = BusinessRules.load(resolved_rules_path)
@@ -404,7 +412,14 @@ class CaseService:
             return repository.list_cases(status)
 
     def query_cases(self, **criteria: Any) -> tuple[list[dict], int]:
-        return self.runtime.repository.query_cases(**criteria)
+        """Stored rows; while a command holds the lock, PROCESSING rows are marked `busy`."""
+        repository = self.runtime.repository
+        with repository.try_command_lock() as acquired:
+            rows, total = repository.query_cases(**criteria)
+        if not acquired:
+            for row in rows:
+                row["busy"] = row["status"] == "PROCESSING"
+        return rows, total
 
     def view_counts(self) -> dict[str, int]:
         return self.runtime.repository.view_counts()

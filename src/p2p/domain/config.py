@@ -5,47 +5,52 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class PriceVarianceRules(BaseModel):
+class RulesModel(BaseModel):
+    # A misspelled key would otherwise fall back to its default without a word.
+    model_config = ConfigDict(extra="forbid")
+
+
+class PriceVarianceRules(RulesModel):
     auto_approve_percent: Decimal = Field(ge=0)
     auto_approve_absolute: Decimal = Field(ge=0)
 
 
-class QuantityVarianceRules(BaseModel):
+class QuantityVarianceRules(RulesModel):
     tolerance_percent: Decimal = Field(ge=0)
 
 
-class ConfidenceRules(BaseModel):
+class ConfidenceRules(RulesModel):
     auto_resolve: float = Field(ge=0, le=1)
 
 
-class RiskRules(BaseModel):
+class RiskRules(RulesModel):
     human_review_invoice_value: Decimal = Field(gt=0)
 
 
-class DuplicateRules(BaseModel):
+class DuplicateRules(RulesModel):
     auto_reject: Literal[True] = True
 
 
-class MissingPORules(BaseModel):
+class MissingPORules(RulesModel):
     require_human_review: Literal[True] = True
 
 
-class MissingReceiptRules(BaseModel):
+class MissingReceiptRules(RulesModel):
     require_human_review: Literal[True] = True
 
 
-class ReflectionRules(BaseModel):
+class ReflectionRules(RulesModel):
     max_iterations: int = Field(default=3, ge=1, le=10)
 
 
-class ReviewRules(BaseModel):
+class ReviewRules(RulesModel):
     sla_hours: int = Field(default=24, ge=1, le=720)
 
 
-class BusinessRules(BaseModel):
+class BusinessRules(RulesModel):
     price_variance: PriceVarianceRules
     quantity_variance: QuantityVarianceRules
     confidence: ConfidenceRules

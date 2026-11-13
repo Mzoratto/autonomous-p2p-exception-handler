@@ -43,7 +43,8 @@ def test_completed_case_label_combines_outcome_and_decision_source(
     assert display_status(completed(action, source)) == StatusView(key, f"{outcome} · {suffix}")
 
 
-def test_processing_case_needs_recovery():
+def test_a_processing_case_no_run_holds_needs_recovery():
+    """A PROCESSING row without `busy` is a run that stopped; a running one is marked `busy`."""
     assert display_status({"status": "PROCESSING", "state": {}}) == StatusView(
         "recovery", "Needs recovery"
     )
@@ -72,6 +73,10 @@ def test_completed_case_without_outcome_needs_recovery():
 )
 def test_format_money(amount, currency, expected):
     assert format_money(amount, currency) == expected
+
+
+def test_a_missing_amount_is_shown_as_a_dash():
+    assert format_money(None, None) == "—"
 
 
 @pytest.mark.parametrize(
