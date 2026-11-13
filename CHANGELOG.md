@@ -2,6 +2,20 @@
 
 All notable changes to this project are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **A missing model is a setup fault (#25).** A 404 from the model service (a mistyped `OPENAI_MODEL` or an `OPENAI_BASE_URL` with the wrong path) now stops processing and shows the setup screen, like a rejected key, instead of sending the case to a reviewer as "Model unavailable". The setup screen names `OPENAI_API_KEY`, `OPENAI_MODEL` and `OPENAI_BASE_URL`.
+- **Docker Compose passes every documented setting (#25).** `P2P_REVIEWER_NAME`, `P2P_LOG_LEVEL`, `OPENAI_TIMEOUT_SECONDS` and `OPENAI_MAX_RETRIES` now reach the container. Compose reads them from the shell or from `.env` next to `docker-compose.yml`, not from `.env.local`.
+- **Unknown rules keys are rejected (#25).** Startup stops when the rules file (`config/business_rules.yaml` or `P2P_RULES_PATH`) has an unknown or misspelled key, and the error names each key. Before, such keys were silently ignored and the defaults applied.
+- **`P2P_LOG_LEVEL` from env files, and a clear error for invalid values (#25).** A level set in `.env.local` or `.env` now applies. An invalid value fails on every rerun with an error naming `P2P_LOG_LEVEL` and the accepted names.
+
+### Changed
+- `P2P_LOG_LEVEL` accepts only `DEBUG`, `INFO`, `WARNING`, `ERROR` and `CRITICAL`, the names the README lists. The `logging` aliases `WARN`, `FATAL` and `NOTSET`, accepted before, now fail; use `WARNING` or `CRITICAL` instead.
+
+### Upgrade notes
+- Remove unknown keys from custom rules files and replace `WARN`, `FATAL` or `NOTSET` log levels before upgrading.
+
 ## [1.1.0] - 2026-11-12
 
 ### Added
