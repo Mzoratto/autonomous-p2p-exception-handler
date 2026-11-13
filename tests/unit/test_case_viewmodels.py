@@ -8,9 +8,11 @@ from p2p.application.service import CaseService, create_runtime
 from p2p.domain.casefacts import primary_exception
 from p2p.domain.models import DecisionType, HumanReview
 from p2p.infrastructure.database import demo_invoices
+from p2p.ui.components.case_detail import ai_html
 from p2p.ui.viewmodels import (
     CANNOT,
     EXCEEDS,
+    AiStoryView,
     ai_story,
     case_header,
     default_tab,
@@ -204,3 +206,9 @@ def test_a_run_that_failed_before_matching_is_not_shown_as_matched(app, rules):
     assert next(item.value for item in header.meta if item.label == "Exception") == "Not checked"
     assert labels["match"] == "Three-way match · Not run"
     assert (match.ran, match.tiles, match.lines) == (False, [], [])
+
+
+def test_an_invoked_ai_story_without_an_investigation_is_refused():
+    """`ai_story` always builds an investigation when the AI was invoked; anything else is a bug."""
+    with pytest.raises(ValueError, match="^An invoked AI story has no investigation$"):
+        ai_html(AiStoryView(invoked=True))

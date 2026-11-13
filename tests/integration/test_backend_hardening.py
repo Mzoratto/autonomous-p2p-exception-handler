@@ -7,12 +7,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import delete
 from streamlit.testing.v1 import AppTest
 from workflow_support import BrokenMatcher, FailingModel, use_workflow
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import CritiqueResult, DecisionType, HumanReview, InvestigationResult
-from p2p.infrastructure.database import Database, demo_invoices
+from p2p.infrastructure.database import CASES, Database, demo_invoices
 from p2p.ports import ModelUnavailableError
 from p2p.ui.viewmodels import display_status
 
@@ -262,3 +263,20 @@ def test_reviewer_sees_model_unavailable_not_a_validation_failure(
     assert note in page
     assert "Model output failed validation" not in page
     assert "insufficient_quota" in page
+
+
+def test_a_case_row_lost_after_the_claim_is_a_storage_fault_not_a_missing_case(app, monkeypatch):
+    """`_stored_case`: the claim wrote the row, so its absence must stop the command loudly."""
+    repository = app.runtime.repository
+    claim = repository.claim_case
+
+    def claim_then_lose_the_row(case_id, invoice, supersede=None):
+        claimed = claim(case_id, invoice, supersede)
+        with repository.database.engine.begin() as connection:
+            connection.execute(delete(CASES).where(CASES.c.case_id == claimed[0]))
+        return claimed
+
+    monkeypatch.setattr(repository, "claim_case", claim_then_lose_the_row)
+
+    with pytest.raises(LookupError, match="^No persisted case exists for CASE-LOST$"):
+        app.process_invoice(demo_invoices()["01_exact_match"], case_id="CASE-LOST")
