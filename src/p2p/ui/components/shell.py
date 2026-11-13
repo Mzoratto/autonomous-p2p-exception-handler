@@ -76,6 +76,8 @@ def render_flash() -> None:
         return
     if flash["kind"] == "toast":
         st.toast(flash["text"], icon=":material/check_circle:")
+    elif "exception" in flash:
+        show_failure(flash["text"], flash["exception"])
     else:
         st.error(flash["text"])
 

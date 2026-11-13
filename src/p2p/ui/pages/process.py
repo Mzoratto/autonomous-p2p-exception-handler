@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import streamlit as st
@@ -26,6 +27,8 @@ from p2p.ui.viewmodels import (
     timeline,
     validation_rows,
 )
+
+logger = logging.getLogger("p2p.ui")
 
 STEPS = ["Choose invoice", "Validate", "Run workflow"]
 STATE_KEYS = (
@@ -301,7 +304,13 @@ def validate_step() -> None:
 def result_step() -> None:
     app = service()
     case_id: str | None = st.session_state.get("process_case_id")
-    case = app.get_case(case_id) if case_id else None
+    try:
+        case = app.get_case(case_id) if case_id else None
+    except ValueError as exc:
+        logger.exception("Processed case %s could not be loaded", case_id)
+        show_failure("The processed case could not be loaded.", exc)
+        st.button("Process another", key="process_another", on_click=reset)
+        return
     if not case_id or not case:
         st.error("The processed case could not be loaded.")
         st.button("Process another", key="process_another", on_click=reset)

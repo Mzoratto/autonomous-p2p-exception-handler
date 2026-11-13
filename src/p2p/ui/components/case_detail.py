@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 import streamlit as st
 
 from p2p.application.service import CaseService
-from p2p.domain.models import Invoice
+from p2p.domain.models import HumanReview, Invoice
 from p2p.ports import ModelAuthenticationError
 from p2p.ui.components.chips import action_pill, h, icon, render_html, status_pill
 from p2p.ui.components.shell import mark_authentication_failure
@@ -25,12 +26,15 @@ from p2p.ui.viewmodels import (
     case_header,
     default_tab,
     display_status,
+    label_action,
     local_zone,
     match_view,
     policy_view,
     tab_labels,
     timeline,
 )
+
+logger = logging.getLogger("p2p.ui")
 
 TILE_ICONS = {"ok": "check_circle", "fail": "cancel", "na": "remove"}
 RESULTS = {
@@ -282,18 +286,33 @@ def render_timeline(case_id: str, events: list[TimelineEvent]) -> None:
 
 
 def retry_case(case: dict, app: CaseService) -> None:
-    """Resume a failed run from its last checkpoint; call from the script body."""
+    """Resume a failed run from its last checkpoint; call from the script body.
+
+    A pending case whose confirmed review was bound before its run failed is resumed with that
+    stored review, as "Finish recovery" on the Review page does; reprocessing would only replay it.
+    """
+    case_id = case["case_id"]
+    submitted = case.get("submitted_review")
     try:
-        result = app.process_invoice(Invoice.model_validate(case["invoice"]))
+        if submitted and case["status"] == "PENDING_REVIEW":
+            app.review_case(
+                case_id,
+                HumanReview.model_validate(submitted),
+                checkpoint_id=case.get("checkpoint_id"),
+            )
+        else:
+            app.process_invoice(Invoice.model_validate(case["invoice"]))
+        status = display_status(app.get_case(case_id) or {})
     except ModelAuthenticationError:
         mark_authentication_failure()
-    except Exception:
+    except Exception as exc:
+        logger.exception("Retry of %s failed", case_id)
         st.session_state["flash"] = {
             "kind": "error",
             "text": "The workflow could not finish. The case is saved; retry it again later.",
+            "exception": exc,
         }
         st.rerun()
-    status = display_status(app.get_case(result["case_id"]) or {})
     st.session_state["flash"] = {
         "kind": "toast",
         "text": f"{case['invoice_id']} processed again · {status.label}",
@@ -304,7 +323,17 @@ def retry_case(case: dict, app: CaseService) -> None:
 def recovery_notice(case: dict, app: CaseService) -> None:
     if display_status(case).key != "recovery":
         return
-    st.warning(f"{case['case_id']} needs recovery. Retrying resumes it from its last saved step.")
+    submitted = case.get("submitted_review")
+    if submitted and case["status"] == "PENDING_REVIEW":
+        applies = (
+            f" It applies the {label_action(submitted['action'])} decision "
+            f"{submitted['reviewer']} already submitted."
+        )
+    else:
+        applies = ""
+    st.warning(
+        f"{case['case_id']} needs recovery. Retrying resumes it from its last saved step.{applies}"
+    )
     if case.get("last_error"):
         with st.expander("Technical details"):
             st.code(case["last_error"], language=None)
