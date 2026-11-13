@@ -142,7 +142,7 @@ def test_a_refused_retry_shows_and_logs_the_reason(database_url, monkeypatch, ca
 
 
 def test_a_retry_whose_case_cannot_be_reloaded_reports_it(database_url, monkeypatch, caplog):
-    """#18: the reload after a retry reconciles the case and can raise; it must not crash."""
+    """#18: the reload after a successful retry can raise; it must say the retry finished."""
     case_id = failed_processing(database_url)
     at = open_page("cases", case=case_id)
     process_invoice = CaseService.process_invoice
@@ -156,9 +156,12 @@ def test_a_retry_whose_case_cannot_be_reloaded_reports_it(database_url, monkeypa
     at.button(key=f"retry_{case_id}").click().run()
 
     assert not at.exception
-    assert any("could not finish" in error.value for error in at.error)
+    assert [error.value for error in at.error if "Retry" in error.value] == [
+        "Retry processing finished, but the case could not be reloaded. Refresh the page."
+    ]
+    assert not any("could not finish" in error.value for error in at.error)
     assert [record.getMessage() for record in logged_failures(caplog)] == [
-        f"Retry of {case_id} failed"
+        f"Retry of {case_id} finished, but the case could not be reloaded"
     ]
 
 

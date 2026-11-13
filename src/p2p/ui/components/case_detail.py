@@ -302,7 +302,6 @@ def retry_case(case: dict, app: CaseService) -> None:
             )
         else:
             app.process_invoice(Invoice.model_validate(case["invoice"]))
-        status = display_status(app.get_case(case_id) or {})
     except ModelAuthenticationError:
         mark_authentication_failure()
     except Exception as exc:
@@ -310,6 +309,16 @@ def retry_case(case: dict, app: CaseService) -> None:
         st.session_state["flash"] = {
             "kind": "error",
             "text": "The workflow could not finish. The case is saved; retry it again later.",
+            "exception": exc,
+        }
+        st.rerun()
+    try:
+        status = display_status(app.get_case(case_id) or {})
+    except ValueError as exc:
+        logger.exception("Retry of %s finished, but the case could not be reloaded", case_id)
+        st.session_state["flash"] = {
+            "kind": "error",
+            "text": "Retry processing finished, but the case could not be reloaded. Refresh the page.",
             "exception": exc,
         }
         st.rerun()
