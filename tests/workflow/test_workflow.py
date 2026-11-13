@@ -1,7 +1,6 @@
 import pytest
-from langgraph.checkpoint.memory import InMemorySaver
+from workflow_support import use_workflow
 
-from p2p.domain.matching import ThreeWayMatcher
 from p2p.domain.models import (
     AuditEventType,
     CritiqueResult,
@@ -9,12 +8,8 @@ from p2p.domain.models import (
     DecisionType,
     HumanReview,
 )
-from p2p.domain.policy import DecisionPolicy
 from p2p.infrastructure.database import demo_invoices
 from p2p.intelligence.providers import MockModelProvider
-from p2p.intelligence.services import Critic, Investigator, Resolver
-from p2p.workflow.graph import build_graph
-from p2p.workflow.nodes import WorkflowDependencies
 
 
 def test_exact_match_auto_approves_without_ai(app):
@@ -133,19 +128,7 @@ def test_max_reflection_iterations_force_human_review(app):
                 )
             return super().structured_response(schema, messages)
 
-    provider = AlwaysInvalidCriticProvider()
-    rules = app.runtime.rules
-    deps = WorkflowDependencies(
-        erp=app.runtime.repository,
-        audit=app.runtime.repository,
-        matcher=ThreeWayMatcher(rules),
-        policy=DecisionPolicy(rules),
-        investigator=Investigator(provider),
-        resolver=Resolver(provider),
-        critic=Critic(provider),
-        rules=rules,
-    )
-    app.runtime.graph = build_graph(deps, InMemorySaver())
+    use_workflow(app, AlwaysInvalidCriticProvider())
     result = app.process_invoice(demo_invoices()["03_large_price_variance"])
     assert result["status"] == "PENDING_REVIEW"
     assert result["state"]["reflection_count"] == 3
@@ -158,19 +141,7 @@ def test_malformed_model_output_fails_closed_to_human_review(app):
         def structured_response(self, schema, messages):
             raise ValueError("provider returned malformed structured output")
 
-    provider = MalformedProvider()
-    rules = app.runtime.rules
-    deps = WorkflowDependencies(
-        erp=app.runtime.repository,
-        audit=app.runtime.repository,
-        matcher=ThreeWayMatcher(rules),
-        policy=DecisionPolicy(rules),
-        investigator=Investigator(provider),
-        resolver=Resolver(provider),
-        critic=Critic(provider),
-        rules=rules,
-    )
-    app.runtime.graph = build_graph(deps, InMemorySaver())
+    use_workflow(app, MalformedProvider())
 
     result = app.process_invoice(demo_invoices()["03_large_price_variance"])
 

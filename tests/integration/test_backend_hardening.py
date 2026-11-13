@@ -13,28 +13,35 @@ from workflow_support import BrokenMatcher, FailingModel, use_workflow
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import CritiqueResult, DecisionType, HumanReview, InvestigationResult
-from p2p.infrastructure.database import CASES, Database, demo_invoices
+from p2p.infrastructure.database import _LOCKS, CASES, Database, demo_invoices
 from p2p.ports import ModelUnavailableError
 from p2p.ui.viewmodels import display_status
 
 REPO = Path(__file__).parents[2]
+# Upper bound only: the holder lets go as soon as the block ends. A read that waits for the lock
+# gets it after this, by which time the holder no longer reports the lock as held.
+HOLD_SECONDS = 30.0
 
 
 @contextmanager
 def command_running(app: CaseService):
-    """Hold the command lock from another thread, as a long workflow run would."""
-    held, release = threading.Event(), threading.Event()
+    """Hold the command lock from another thread, as a long workflow run would.
+
+    Yields a check that is true while the holder still has the lock.
+    """
+    held, release, let_go = threading.Event(), threading.Event(), threading.Event()
 
     def hold() -> None:
         with app.runtime.repository.command_lock():
             held.set()
-            release.wait(10)
+            release.wait(HOLD_SECONDS)
+            let_go.set()
 
     worker = threading.Thread(target=hold)
     worker.start()
     assert held.wait(5)
     try:
-        yield
+        yield lambda: not let_go.is_set()
     finally:
         release.set()
         worker.join()
@@ -43,14 +50,13 @@ def command_running(app: CaseService):
 def test_reads_return_stored_rows_while_a_command_runs(app):
     case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
 
-    with command_running(app):
-        started = time.monotonic()
+    with command_running(app) as lock_held:
         app.refresh_open_cases()
         case = app.get_case(case_id)
         rows, total = app.query_cases()
-        elapsed = time.monotonic() - started
+        read_while_held = lock_held()
 
-    assert elapsed < 1.0
+    assert read_while_held, "the reads waited for the command lock"
     assert (case["busy"], case["checkpoint_id"], case["status"]) == (True, None, "PENDING_REVIEW")
     assert display_status(case).label == "Processing"
     assert case["audit"]
@@ -59,6 +65,57 @@ def test_reads_return_stored_rows_while_a_command_runs(app):
     case = app.get_case(case_id)
     assert case["busy"] is False
     assert case["checkpoint_id"]
+
+
+class RecordingLock:
+    """The per-file command lock, recording how each thread asks for it."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self.requests: list[tuple[int, bool, float]] = []
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        self.requests.append((threading.get_ident(), blocking, timeout))
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc_info) -> None:
+        self.release()
+
+
+def test_reads_only_try_the_command_lock_and_never_wait_for_it(app, monkeypatch):
+    """A read that waits a bounded time, say `acquire(timeout=3)`, still returns while the holder
+    has the lock, so the test above misses it. Here each read's try must ask once, without
+    waiting: no timeout and no retries."""
+    case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
+    repository = app.runtime.repository
+    _, lock_file = repository._lock_path()
+    lock = RecordingLock()
+    monkeypatch.setitem(_LOCKS, lock_file.removesuffix(".commands.lock"), lock)
+    try_lock, tries = repository.try_command_lock, []
+
+    def counted_try_lock():
+        tries.append(1)
+        return try_lock()
+
+    monkeypatch.setattr(repository, "try_command_lock", counted_try_lock)
+
+    with command_running(app):
+        app.refresh_open_cases()
+        app.get_case(case_id)
+        app.query_cases()
+
+    reader = threading.get_ident()
+    reads = [(blocking, timeout) for ident, blocking, timeout in lock.requests if ident == reader]
+    holds = [(blocking, timeout) for ident, blocking, timeout in lock.requests if ident != reader]
+    assert holds == [(True, -1)], "the lock under test is not the one the command takes"
+    assert len(tries) >= 2, "refresh_open_cases and get_case each try the lock"
+    assert reads == [(False, -1)] * len(tries), "a read asked to wait for the command lock"
 
 
 def test_review_page_waits_for_a_busy_case_instead_of_offering_a_decision(tmp_path, monkeypatch):
@@ -73,14 +130,14 @@ def test_review_page_waits_for_a_busy_case_instead_of_offering_a_decision(tmp_pa
         at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15)
         at.query_params["case"] = case_id
         at.run()  # Startup migrates under the command lock; start the app before the command.
-        with command_running(app):
-            started = time.monotonic()
-            at.switch_page("src/p2p/ui/pages/review.py").run()
-            elapsed = time.monotonic() - started
+        with command_running(app) as lock_held:
+            # Longer than the hold, so a page that waits for the lock fails the check below.
+            at.switch_page("src/p2p/ui/pages/review.py").run(timeout=2 * HOLD_SECONDS)
+            read_while_held = lock_held()
     finally:
         runtime.close()
 
-    assert elapsed < 5.0
+    assert read_while_held, "the review page waited for the command lock"
 
     assert not at.exception
     assert f"review_decision_{case_id}" not in {radio.key for radio in at.radio}

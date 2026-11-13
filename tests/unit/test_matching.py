@@ -1,18 +1,12 @@
 from decimal import Decimal
 
+import pytest
+from workflow_support import erp_context
+
 from p2p.domain.matching import ThreeWayMatcher
-from p2p.domain.models import DiscrepancyType, ERPContext, Severity
+from p2p.domain.models import DiscrepancyType, Severity
+from p2p.domain.policy import DecisionPolicy
 from p2p.infrastructure.database import demo_invoices
-
-
-def context_for(app, invoice):
-    repo = app.runtime.repository
-    return ERPContext(
-        purchase_order=repo.get_purchase_order(invoice.po_number),
-        goods_receipts=repo.get_goods_receipts(invoice.po_number),
-        supplier=repo.get_supplier(invoice.supplier_id),
-        previous_invoices=repo.get_previous_invoices(invoice.supplier_id),
-    )
 
 
 def types(result):
@@ -21,14 +15,14 @@ def types(result):
 
 def test_exact_three_way_match(app, rules):
     invoice = demo_invoices()["01_exact_match"]
-    result = ThreeWayMatcher(rules).match(invoice, context_for(app, invoice))
+    result = ThreeWayMatcher(rules).match(invoice, erp_context(app, invoice))
     assert result.matched is True
     assert result.discrepancies == []
 
 
 def test_small_price_variance_is_visible_but_non_material(app, rules):
     invoice = demo_invoices()["02_small_price_variance"]
-    result = ThreeWayMatcher(rules).match(invoice, context_for(app, invoice))
+    result = ThreeWayMatcher(rules).match(invoice, erp_context(app, invoice))
     assert result.matched is True
     assert result.discrepancies[0].type is DiscrepancyType.PRICE_VARIANCE
     assert result.discrepancies[0].severity is Severity.WARNING
@@ -36,7 +30,7 @@ def test_small_price_variance_is_visible_but_non_material(app, rules):
 
 def test_large_price_variance_is_material(app, rules):
     invoice = demo_invoices()["03_large_price_variance"]
-    result = ThreeWayMatcher(rules).match(invoice, context_for(app, invoice))
+    result = ThreeWayMatcher(rules).match(invoice, erp_context(app, invoice))
     assert result.matched is False
     assert result.discrepancies[0].variance_percent == 10
 
@@ -46,10 +40,10 @@ def test_quantity_and_receipt_controls(app, rules):
     quantity = demo_invoices()["04_quantity_variance"]
     exceeds = demo_invoices()["05_quantity_exceeds_receipt"]
     assert DiscrepancyType.QUANTITY_VARIANCE in types(
-        matcher.match(quantity, context_for(app, quantity))
+        matcher.match(quantity, erp_context(app, quantity))
     )
     assert DiscrepancyType.QUANTITY_EXCEEDS_RECEIPT in types(
-        matcher.match(exceeds, context_for(app, exceeds))
+        matcher.match(exceeds, erp_context(app, exceeds))
     )
 
 
@@ -63,22 +57,36 @@ def test_missing_po_receipt_duplicate_and_supplier_mismatch(app, rules):
     }
     for scenario, discrepancy_type in expected.items():
         invoice = demo_invoices()[scenario]
-        assert discrepancy_type in types(matcher.match(invoice, context_for(app, invoice)))
+        assert discrepancy_type in types(matcher.match(invoice, erp_context(app, invoice)))
 
 
 def test_currency_mismatch(app, rules):
     invoice = demo_invoices()["01_exact_match"]
-    context = context_for(app, invoice)
+    context = erp_context(app, invoice)
     context.purchase_order = context.purchase_order.model_copy(update={"currency": "USD"})
     result = ThreeWayMatcher(rules).match(invoice, context)
     assert DiscrepancyType.CURRENCY_MISMATCH in types(result)
+
+
+@pytest.mark.parametrize("status", ["DRAFT", "ON_HOLD"])
+def test_a_po_in_an_unknown_state_is_not_open_and_requires_review(app, rules, status):
+    """Only OPEN is eligible: closed, cancelled and unknown PO states require review."""
+    invoice = demo_invoices()["01_exact_match"]
+    context = erp_context(app, invoice)
+    context.purchase_order = context.purchase_order.model_copy(update={"status": status})
+
+    result = ThreeWayMatcher(rules).match(invoice, context)
+
+    assert result.matched is False
+    assert DiscrepancyType.PO_NOT_OPEN in types(result)
+    assert DecisionPolicy(rules).evaluate(invoice, result, None).requires_human_review
 
 
 def test_matcher_catches_arithmetic_corruption_after_validation(app, rules):
     invoice = demo_invoices()["01_exact_match"].model_copy(deep=True)
     invoice.line_items[0].line_total += Decimal("1.00")
 
-    result = ThreeWayMatcher(rules).match(invoice, context_for(app, invoice))
+    result = ThreeWayMatcher(rules).match(invoice, erp_context(app, invoice))
 
     arithmetic = [
         item
