@@ -136,7 +136,7 @@ The timeout, retry and endpoint settings are listed under [Environment variables
 
 Requests are sent with `store=False`. Each AI audit event records the model, response id, token counts and latency of the call.
 
-When the model service cannot be reached (timeout, connection error, rate limit, server error, or an exhausted quota), the workflow stops asking the model, records the failure and sends the case to a reviewer; the reviewer sees "Model unavailable" and the reason. A rejected API key, or one without access to the configured model, is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
+When the model service cannot be reached (timeout, connection error, rate limit, server error, or an exhausted quota), the workflow stops asking the model, records the failure and sends the case to a reviewer; the reviewer sees "Model unavailable" and the reason. A rejected API key, a key without access to the configured model, or a model the service does not find (a 404, usually a mistyped `OPENAI_MODEL` or an `OPENAI_BASE_URL` with the wrong path) is treated as a configuration fault instead: processing stops, the case stays recoverable, and the dashboard shows a setup screen that names `OPENAI_API_KEY`, `OPENAI_MODEL` and `OPENAI_BASE_URL`. Starting with `DEMO_MODE=false` and no key shows the same screen. `P2P_DATABASE_URL` must not carry query options such as `?timeout=10`.
 
 Never commit a real API key. `.env.local` is ignored by Git.
 
@@ -244,7 +244,7 @@ Threshold comparisons retain Decimal precision. Monetary totals use two decimal 
 
 Operational thresholds live in [`config/business_rules.yaml`](config/business_rules.yaml).
 
-Duplicate rejection and missing-document review switches must remain true; startup rejects unsafe combinations.
+Duplicate rejection and missing-document review switches must remain true; startup rejects unsafe combinations. Startup also rejects unknown or misspelled keys (for example `reflection.max_iteration`) and names each one in the error, so remove keys the current version does not declare before upgrading.
 
 This includes price and quantity tolerances, confidence gates, high-value review rules, duplicate handling, missing-document controls, the reflection limit, and the review target (`review.sla_hours`, default 24) drawn on the Overview's waiting chart.
 
