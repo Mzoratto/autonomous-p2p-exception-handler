@@ -407,7 +407,14 @@ class CaseService:
             return repository.list_cases(status)
 
     def query_cases(self, **criteria: Any) -> tuple[list[dict], int]:
-        return self.runtime.repository.query_cases(**criteria)
+        """Stored rows; while a command holds the lock, PROCESSING rows are marked `busy`."""
+        repository = self.runtime.repository
+        with repository.try_command_lock() as acquired:
+            rows, total = repository.query_cases(**criteria)
+        if not acquired:
+            for row in rows:
+                row["busy"] = row["status"] == "PROCESSING"
+        return rows, total
 
     def view_counts(self) -> dict[str, int]:
         return self.runtime.repository.view_counts()
