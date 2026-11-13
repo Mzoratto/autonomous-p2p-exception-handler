@@ -1,4 +1,5 @@
 import hashlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,24 @@ def pytest_sessionfinish(session):
                 "created" if path not in before else "removed" if path not in after else "modified"
             )
             reporter.write_line(f"{change}: {path}")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _default_database_url(tmp_path_factory):
+    """Anything that falls back to P2P_DATABASE_URL, a spawned process included, gets a temp file."""
+    url = f"sqlite:///{tmp_path_factory.mktemp('default-database') / 'p2p.db'}"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("P2P_DATABASE_URL", url)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_main_module():
+    """AppTest's script runner installs app.py as __main__ and leaves it there. A process
+    started later with the spawn method would then run app.py on startup, and with it the app."""
+    main = sys.modules["__main__"]
+    yield
+    sys.modules["__main__"] = main
 
 
 @pytest.fixture(autouse=True)
