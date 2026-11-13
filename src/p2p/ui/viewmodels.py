@@ -124,7 +124,10 @@ def display_status(case: dict) -> StatusView:
     return StatusView("recovery", "Needs recovery")
 
 
-def format_money(amount: object, currency: str) -> str:
+def format_money(amount: object, currency: str | None) -> str:
+    """A missing amount (a case the migration could not read) is shown as "—"."""
+    if amount is None or currency is None:
+        return "—"
     value = Decimal(str(amount)).quantize(CENT, rounding=ROUND_HALF_EVEN)
     code = currency.upper()
     prefix = CURRENCY_SYMBOLS.get(code, f"{code} ")

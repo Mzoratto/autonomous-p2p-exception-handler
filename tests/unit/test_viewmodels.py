@@ -74,6 +74,10 @@ def test_format_money(amount, currency, expected):
     assert format_money(amount, currency) == expected
 
 
+def test_a_missing_amount_is_shown_as_a_dash():
+    assert format_money(None, None) == "—"
+
+
 @pytest.mark.parametrize(
     ("seconds", "expected"),
     [

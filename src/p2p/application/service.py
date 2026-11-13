@@ -73,8 +73,11 @@ logger = logging.getLogger("p2p.service")
 
 
 def _value_by_currency(rows: list[dict]) -> dict[str, str]:
+    """Sum stored totals by currency; a row the migration could not read has no total."""
     totals: dict[str, Decimal] = {}
     for row in rows:
+        if row["total"] is None:
+            continue
         totals[row["currency"]] = totals.get(row["currency"], Decimal("0")) + Decimal(row["total"])
     return {currency: f"{amount:.2f}" for currency, amount in sorted(totals.items())}
 
