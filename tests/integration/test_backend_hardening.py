@@ -13,7 +13,7 @@ from workflow_support import BrokenMatcher, FailingModel, use_workflow
 
 from p2p.application.service import CaseService, create_runtime
 from p2p.domain.models import CritiqueResult, DecisionType, HumanReview, InvestigationResult
-from p2p.infrastructure.database import CASES, Database, demo_invoices
+from p2p.infrastructure.database import _LOCKS, CASES, Database, demo_invoices
 from p2p.ports import ModelUnavailableError
 from p2p.ui.viewmodels import display_status
 
@@ -65,6 +65,47 @@ def test_reads_return_stored_rows_while_a_command_runs(app):
     case = app.get_case(case_id)
     assert case["busy"] is False
     assert case["checkpoint_id"]
+
+
+class RecordingLock:
+    """The per-file command lock, recording how each thread asks for it."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self.requests: list[tuple[int, bool, float]] = []
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        self.requests.append((threading.get_ident(), blocking, timeout))
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc_info) -> None:
+        self.release()
+
+
+def test_reads_only_try_the_command_lock_and_never_wait_for_it(app, monkeypatch):
+    """A read that waits a bounded time, say `acquire(timeout=3)`, still returns while the holder
+    has the lock, so the test above misses it. Here every read must ask without waiting."""
+    case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
+    _, lock_file = app.runtime.repository._lock_path()
+    lock = RecordingLock()
+    monkeypatch.setitem(_LOCKS, lock_file.removesuffix(".commands.lock"), lock)
+
+    with command_running(app):
+        app.refresh_open_cases()
+        app.get_case(case_id)
+        app.query_cases()
+
+    reader = threading.get_ident()
+    reads = [(blocking, timeout) for ident, blocking, timeout in lock.requests if ident == reader]
+    holds = [(blocking, timeout) for ident, blocking, timeout in lock.requests if ident != reader]
+    assert holds == [(True, -1)], "the lock under test is not the one the command takes"
+    assert reads == [(False, -1), (False, -1)], "a read asked to wait for the command lock"
 
 
 def test_review_page_waits_for_a_busy_case_instead_of_offering_a_decision(tmp_path, monkeypatch):
