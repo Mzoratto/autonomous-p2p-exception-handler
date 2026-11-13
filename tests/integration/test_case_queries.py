@@ -1,5 +1,4 @@
 import sqlite3
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -409,48 +408,69 @@ def test_reconciling_an_unchanged_case_writes_nothing(app):
     assert (repo.query_cases()[0][0]["updated_at"], total_changes()) == before
 
 
-def test_read_path_stays_fast_with_three_hundred_cases(app):
+def test_read_path_statements_do_not_grow_with_the_number_of_cases(app):
     repo = app.runtime.repository
     exact = demo_invoices()["01_exact_match"]
-    with repo.database.session_factory() as session:
-        for index in range(280):
-            invoice = exact.model_copy(update={"invoice_id": f"SYN-{index:04d}"})
-            session.add(
-                CaseRow(
-                    case_id=f"CASE-SYN{index:04d}",
-                    invoice_id=invoice.invoice_id,
-                    status="COMPLETED",
-                    invoice_payload=invoice.model_dump_json(),
-                    state_payload='{"outcome": {"action": "APPROVE", "source": "AUTONOMOUS"}}',
-                    supplier_id=invoice.supplier_id,
-                    supplier_name=invoice.supplier_name,
-                    po_number=invoice.po_number,
-                    currency="EUR",
-                    total_cents=100000,
-                    severity_rank=0,
-                    outcome_action="APPROVE",
-                    outcome_source="AUTONOMOUS",
-                    created_at=datetime(2026, 1, 1),
-                    completed_at=datetime(2026, 1, 1),
+
+    def add_completed(start: int, count: int) -> None:
+        with repo.database.session_factory() as session:
+            for index in range(start, start + count):
+                invoice = exact.model_copy(update={"invoice_id": f"SYN-{index:04d}"})
+                session.add(
+                    CaseRow(
+                        case_id=f"CASE-SYN{index:04d}",
+                        invoice_id=invoice.invoice_id,
+                        status="COMPLETED",
+                        invoice_payload=invoice.model_dump_json(),
+                        state_payload='{"outcome": {"action": "APPROVE", "source": "AUTONOMOUS"}}',
+                        supplier_id=invoice.supplier_id,
+                        supplier_name=invoice.supplier_name,
+                        po_number=invoice.po_number,
+                        currency="EUR",
+                        total_cents=100000,
+                        severity_rank=0,
+                        outcome_action="APPROVE",
+                        outcome_source="AUTONOMOUS",
+                        created_at=datetime(2026, 1, 1),
+                        completed_at=datetime(2026, 1, 1),
+                    )
                 )
-            )
-        session.commit()
+            session.commit()
+
+    def read_path() -> tuple[dict, list[dict], int, int]:
+        """The reads one page run makes, and the number of SQL statements they execute."""
+        statements = []
+
+        def record(connection, cursor, statement, *args) -> None:
+            statements.append(statement)
+
+        event.listen(repo.database.engine, "before_cursor_execute", record)
+        try:
+            app.refresh_open_cases()
+            summary = app.summary()
+            rows, total = app.query_cases(view="all", sort="updated", limit=50)
+        finally:
+            event.remove(repo.database.engine, "before_cursor_execute", record)
+        return summary, rows, total, len(statements)
+
+    add_completed(0, 280)
     template = demo_invoices()["06_missing_po"]
     for index in range(20):
         app.process_invoice(
             Invoice.model_validate({**template.model_dump(), "invoice_id": f"INV-NOPO-{index}"})
         )
 
-    started = time.perf_counter()
-    app.refresh_open_cases()
-    summary = app.summary()
-    rows, total = app.query_cases(view="all", sort="updated", limit=50)
-    elapsed = time.perf_counter() - started
+    summary, rows, total, statements = read_path()
 
-    print(f"read path for {total} cases: {elapsed:.3f} s")
     assert (summary["total"], total, len(rows)) == (300, 300, 50)
     assert summary["counts"]["review"] == 20
-    assert elapsed < 1.0
+
+    # Reading per case, or reconciling settled cases, would grow with the number of cases.
+    add_completed(280, 280)
+    summary, rows, total, statements_for_more_cases = read_path()
+
+    assert (summary["total"], total, len(rows)) == (580, 580, 50)
+    assert statements_for_more_cases == statements
 
 
 def test_migration_records_a_row_that_vanishes_mid_backfill_as_a_lookup_error(tmp_path):

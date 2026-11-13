@@ -18,23 +18,30 @@ from p2p.ports import ModelUnavailableError
 from p2p.ui.viewmodels import display_status
 
 REPO = Path(__file__).parents[2]
+# Upper bound only: the holder lets go as soon as the block ends. A read that waits for the lock
+# gets it after this, by which time the holder no longer reports the lock as held.
+HOLD_SECONDS = 30.0
 
 
 @contextmanager
 def command_running(app: CaseService):
-    """Hold the command lock from another thread, as a long workflow run would."""
-    held, release = threading.Event(), threading.Event()
+    """Hold the command lock from another thread, as a long workflow run would.
+
+    Yields a check that is true while the holder still has the lock.
+    """
+    held, release, let_go = threading.Event(), threading.Event(), threading.Event()
 
     def hold() -> None:
         with app.runtime.repository.command_lock():
             held.set()
-            release.wait(10)
+            release.wait(HOLD_SECONDS)
+            let_go.set()
 
     worker = threading.Thread(target=hold)
     worker.start()
     assert held.wait(5)
     try:
-        yield
+        yield lambda: not let_go.is_set()
     finally:
         release.set()
         worker.join()
@@ -43,14 +50,13 @@ def command_running(app: CaseService):
 def test_reads_return_stored_rows_while_a_command_runs(app):
     case_id = app.process_invoice(demo_invoices()["03_large_price_variance"])["case_id"]
 
-    with command_running(app):
-        started = time.monotonic()
+    with command_running(app) as lock_held:
         app.refresh_open_cases()
         case = app.get_case(case_id)
         rows, total = app.query_cases()
-        elapsed = time.monotonic() - started
+        read_while_held = lock_held()
 
-    assert elapsed < 1.0
+    assert read_while_held, "the reads waited for the command lock"
     assert (case["busy"], case["checkpoint_id"], case["status"]) == (True, None, "PENDING_REVIEW")
     assert display_status(case).label == "Processing"
     assert case["audit"]
@@ -73,14 +79,14 @@ def test_review_page_waits_for_a_busy_case_instead_of_offering_a_decision(tmp_pa
         at = AppTest.from_file(str(REPO / "app.py"), default_timeout=15)
         at.query_params["case"] = case_id
         at.run()  # Startup migrates under the command lock; start the app before the command.
-        with command_running(app):
-            started = time.monotonic()
-            at.switch_page("src/p2p/ui/pages/review.py").run()
-            elapsed = time.monotonic() - started
+        with command_running(app) as lock_held:
+            # Longer than the hold, so a page that waits for the lock fails the check below.
+            at.switch_page("src/p2p/ui/pages/review.py").run(timeout=2 * HOLD_SECONDS)
+            read_while_held = lock_held()
     finally:
         runtime.close()
 
-    assert elapsed < 5.0
+    assert read_while_held, "the review page waited for the command lock"
 
     assert not at.exception
     assert f"review_decision_{case_id}" not in {radio.key for radio in at.radio}
