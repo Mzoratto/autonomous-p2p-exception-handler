@@ -118,6 +118,12 @@ class Runtime:
             self.checkpoint_connection.close()
 
 
+def load_env_files() -> None:
+    """Fill unset variables from `.env.local`, then `.env`; the process environment wins."""
+    load_dotenv(".env.local")
+    load_dotenv(".env")
+
+
 def create_runtime(
     database_url: str | None = None,
     demo_mode: bool | None = None,
@@ -125,8 +131,7 @@ def create_runtime(
     auto_seed: bool = True,
     rules_path: str | Path | None = None,
 ) -> Runtime:
-    load_dotenv(".env.local")
-    load_dotenv(".env")
+    load_env_files()
     url = database_url or os.getenv("P2P_DATABASE_URL", "sqlite:///data/demo/p2p.db")
     resolved_rules_path = resolve_rules_path(rules_path)
     rules = BusinessRules.load(resolved_rules_path)

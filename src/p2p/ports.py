@@ -52,7 +52,10 @@ class ModelUnavailableError(RuntimeError):
 
 
 class ModelAuthenticationError(RuntimeError):
-    """The model service rejected the credentials; a configuration fault, not an outage."""
+    """The model service rejected the key, denied it the model, or did not find the model (401/403/404).
+
+    A configuration fault in `OPENAI_API_KEY`, `OPENAI_MODEL` or `OPENAI_BASE_URL`, not an outage.
+    """
 
 
 class ModelConfigurationError(RuntimeError):

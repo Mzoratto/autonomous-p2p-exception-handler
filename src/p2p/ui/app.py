@@ -7,6 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from p2p.application.service import load_env_files
 from p2p.ports import ModelConfigurationError
 from p2p.ui.components.chips import h, render_html
 from p2p.ui.components.shell import SETUP_ERROR_KEY, load_styles, render_flash, setup_screen
@@ -73,11 +74,26 @@ def runtime_card() -> None:
     )
 
 
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+
 @cache
 def configure_logging() -> None:
-    """Once per process: Streamlit reruns main() on every interaction."""
+    """Once per process: Streamlit reruns main() on every interaction.
+
+    A failure is not cached, so an invalid level fails every rerun with the same message.
+    """
+    load_env_files()  # The level may come from `.env.local` or `.env`, read before service().
+    raw = os.getenv("P2P_LOG_LEVEL", "")
+    level = raw.strip().upper() or "INFO"
+    if level not in LOG_LEVELS:
+        # Checked before basicConfig: it attaches its handler before rejecting a level, and a
+        # rerun would then return early and leave logging unconfigured.
+        raise ValueError(
+            f"P2P_LOG_LEVEL={raw!r} is not a log level; use one of {', '.join(LOG_LEVELS)}"
+        )
     logging.basicConfig(
-        level=os.getenv("P2P_LOG_LEVEL", "INFO").upper(),
+        level=level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 

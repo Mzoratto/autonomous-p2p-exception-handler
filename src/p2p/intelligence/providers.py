@@ -324,9 +324,13 @@ class OpenAIModelProvider:
         # Every mapped error is raised "from None": the original exception may echo the key,
         # and a chained cause would print it in logged tracebacks. The new message names the
         # original error and up to three underlying causes, all redacted.
-        except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
-            # A rejected key, or one without access to the model, is a configuration fault;
-            # routing cases to review would hide it.
+        except (
+            openai.AuthenticationError,
+            openai.PermissionDeniedError,
+            openai.NotFoundError,
+        ) as exc:
+            # A rejected key, one without access to the model, or a model (or endpoint path)
+            # that does not exist is a configuration fault; routing cases to review would hide it.
             raise ModelAuthenticationError(
                 describe_error(exc, self._api_key, with_type=False)
             ) from None
