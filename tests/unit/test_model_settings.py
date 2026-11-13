@@ -1,6 +1,6 @@
 import pytest
 
-from p2p.intelligence.providers import OpenAIModelProvider
+from p2p.intelligence.providers import ModelSettings, OpenAIModelProvider
 from p2p.ports import ModelConfigurationError
 
 OPENAI_DEFAULT = "https://api.openai.com/v1/"
@@ -86,3 +86,13 @@ def test_blank_key_is_missing(monkeypatch, blank):
 
     with pytest.raises(ModelConfigurationError, match="^Live mode needs an API key$"):
         OpenAIModelProvider()
+
+
+def test_a_base_url_without_a_host_is_refused_when_the_host_is_read():
+    """`from_env` rejects such URLs; settings built another way must not report a blank host."""
+    settings = ModelSettings(
+        api_key="sk-test", model="gpt-4.1-mini", base_url="https:///v1", timeout=30.0, max_retries=2
+    )
+
+    with pytest.raises(ValueError, match="^base_url has no host$"):
+        _ = settings.host
