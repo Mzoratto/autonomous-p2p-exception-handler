@@ -73,8 +73,11 @@ logger = logging.getLogger("p2p.service")
 
 
 def _value_by_currency(rows: list[dict]) -> dict[str, str]:
+    """Sum stored totals by currency; a row the migration could not read has no total."""
     totals: dict[str, Decimal] = {}
     for row in rows:
+        if row["total"] is None:
+            continue
         totals[row["currency"]] = totals.get(row["currency"], Decimal("0")) + Decimal(row["total"])
     return {currency: f"{amount:.2f}" for currency, amount in sorted(totals.items())}
 
@@ -409,7 +412,14 @@ class CaseService:
             return repository.list_cases(status)
 
     def query_cases(self, **criteria: Any) -> tuple[list[dict], int]:
-        return self.runtime.repository.query_cases(**criteria)
+        """Stored rows; while a command holds the lock, PROCESSING rows are marked `busy`."""
+        repository = self.runtime.repository
+        with repository.try_command_lock() as acquired:
+            rows, total = repository.query_cases(**criteria)
+        if not acquired:
+            for row in rows:
+                row["busy"] = row["status"] == "PROCESSING"
+        return rows, total
 
     def view_counts(self) -> dict[str, int]:
         return self.runtime.repository.view_counts()

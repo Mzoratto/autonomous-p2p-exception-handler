@@ -73,6 +73,28 @@ def test_case_detail_reports_a_case_that_lost_its_checkpoint(database_url):
     assert any(f"{broken} needs recovery" in error.value for error in at.error)
 
 
+MISSING_AMOUNT = {
+    "overview": '<span class="p2p-attention-amount">—</span>',
+    "review": "<span>—</span></div>",
+}
+
+
+@pytest.mark.parametrize("page", ["overview", "review"])
+def test_pages_render_a_legacy_case_with_no_stored_total(database_url, page):
+    """#6: a row the migration could not read keeps empty total and currency columns."""
+    [legacy] = process(database_url, "03_large_price_variance")
+    drop_checkpoint(database_url, legacy)
+    with sqlite3.connect(database_url.removeprefix("sqlite:///")) as connection:
+        connection.execute(
+            "UPDATE cases SET total_cents = NULL, currency = NULL WHERE case_id = ?", (legacy,)
+        )
+
+    at = open_page(page, case=legacy)
+
+    assert not at.exception
+    assert MISSING_AMOUNT[page] in html(at)
+
+
 EMPTY_STATE_ACTIONS = {
     "overview": {
         "overview_run_all_top",
